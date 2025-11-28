@@ -34,3 +34,27 @@ private:
     Color color_;
 };
 
+class CheckerTexture : public Texture {
+public:
+    CheckerTexture() = default;
+
+    CheckerTexture(const TexturePtr& even, const TexturePtr& odd, float scale = 1.0f)
+        : even_(even), odd_(odd), scale_(scale) {}
+
+    Color value(float u, float v, const Vec3& p) const override {
+        const float sx = std::floor(scale_ * p.x);
+        const float sy = std::floor(scale_ * p.y);
+        const float sz = std::floor(scale_ * p.z);
+
+        const int sum = static_cast<int>(sx + sy + sz);
+        if (sum & 1) {
+            return odd_ ? odd_->value(u, v, p) : Color(0.0f);
+        }
+        return even_ ? even_->value(u, v, p) : Color(1.0f);
+    }
+
+private:
+    TexturePtr even_;
+    TexturePtr odd_;
+    float scale_ = 1.0f;
+};

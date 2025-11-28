@@ -32,12 +32,17 @@ inline Scene build_simple_scene_basic() {
     const float z0 = -3.0f;
     const float z1 = -1.0f;
 
-    // Floor (y = y0)
+    // Checker floor (y = y0)
+    auto floor_even = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
+    auto floor_odd = std::make_shared<SolidColor>(Color(0.2f, 0.2f, 0.2f));
+    auto floor_checker = std::make_shared<CheckerTexture>(floor_even, floor_odd, 4.0f);
+    auto floor_mat = std::make_shared<Lambertian>(floor_checker);
+
     scene.objects.push_back(std::make_shared<Quad>(
         Vec3(x0, y0, z0),
         Vec3(x1 - x0, 0.0f, 0.0f),
         Vec3(0.0f, 0.0f, z1 - z0),
-        white));
+        floor_mat));
 
     // Ceiling (y = y1)
     scene.objects.push_back(std::make_shared<Quad>(
@@ -85,6 +90,11 @@ inline Scene build_simple_scene_basic() {
     auto diffuse = std::make_shared<Lambertian>(diffuse_tex);
     scene.objects.push_back(
         std::make_shared<Sphere>(Vec3(-0.5f, 0.5f, -2.2f), 0.5f, diffuse));
+
+    // Textured sphere using the same checker texture for visual verification.
+    auto checker_sphere_mat = std::make_shared<Lambertian>(floor_checker);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.0f, 1.0f, -2.3f), 0.3f, checker_sphere_mat));
 
     auto metal_tex = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
     auto metal = std::make_shared<Metal>(metal_tex, 0.1f);
