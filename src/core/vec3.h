@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+constexpr float kPi = 3.14159265358979323846f;
+
 struct Vec3 {
     float x;
     float y;

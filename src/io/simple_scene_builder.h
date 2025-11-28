@@ -4,6 +4,7 @@
 
 #include "core/color.h"
 #include "scene/material.h"
+#include "scene/quad.h"
 #include "scene/scene.h"
 #include "scene/sphere.h"
 #include "scene/texture.h"
@@ -11,29 +12,84 @@
 inline Scene build_simple_scene_basic() {
     Scene scene;
 
-    // Ground
-    auto ground_tex = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.0f));
-    auto ground_mat = std::make_shared<Lambertian>(ground_tex);
-    scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.0f, -1000.5f, -1.0f), 1000.0f, ground_mat));
+    // Materials
+    auto white_tex = std::make_shared<SolidColor>(Color(0.73f, 0.73f, 0.73f));
+    auto red_tex = std::make_shared<SolidColor>(Color(0.65f, 0.05f, 0.05f));
+    auto green_tex = std::make_shared<SolidColor>(Color(0.12f, 0.45f, 0.15f));
 
-    // Diffuse sphere
+    auto white = std::make_shared<Lambertian>(white_tex);
+    auto red = std::make_shared<Lambertian>(red_tex);
+    auto green = std::make_shared<Lambertian>(green_tex);
+
+    auto light_tex = std::make_shared<SolidColor>(Color(12.0f, 12.0f, 12.0f));
+    auto light = std::make_shared<DiffuseLight>(light_tex);
+
+    // Room dimensions (Cornell-style box)
+    const float x0 = -1.0f;
+    const float x1 = 1.0f;
+    const float y0 = 0.0f;
+    const float y1 = 2.0f;
+    const float z0 = -3.0f;
+    const float z1 = -1.0f;
+
+    // Floor (y = y0)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z0),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, z1 - z0),
+        white));
+
+    // Ceiling (y = y1)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y1, z0),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, z1 - z0),
+        white));
+
+    // Back wall (z = z0)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z0),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        white));
+
+    // Left wall (x = x0) - red
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z1),
+        Vec3(0.0f, 0.0f, z0 - z1),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        red));
+
+    // Right wall (x = x1) - green
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x1, y0, z0),
+        Vec3(0.0f, 0.0f, z1 - z0),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        green));
+
+    // Ceiling light quad (small emissive patch)
+    const float lx0 = -0.5f;
+    const float lx1 = 0.5f;
+    const float lz0 = -2.5f;
+    const float lz1 = -1.5f;
+    const float ly = y1 - 0.01f;
+
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(lx0, ly, lz0),
+        Vec3(lx1 - lx0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, lz1 - lz0),
+        light));
+
+    // Objects in the box: one diffuse and one metal sphere
     auto diffuse_tex = std::make_shared<SolidColor>(Color(0.7f, 0.3f, 0.3f));
-    auto diffuse_mat = std::make_shared<Lambertian>(diffuse_tex);
+    auto diffuse = std::make_shared<Lambertian>(diffuse_tex);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(-0.6f, 0.0f, -1.0f), 0.5f, diffuse_mat));
+        std::make_shared<Sphere>(Vec3(-0.5f, 0.5f, -2.2f), 0.5f, diffuse));
 
-    // Metal sphere
     auto metal_tex = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
-    auto metal_mat = std::make_shared<Metal>(metal_tex, 0.1f);
+    auto metal = std::make_shared<Metal>(metal_tex, 0.1f);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.6f, 0.0f, -1.0f), 0.5f, metal_mat));
-
-    // Emissive light sphere above
-    auto light_tex = std::make_shared<SolidColor>(Color(4.0f, 4.0f, 4.0f));
-    auto light_mat = std::make_shared<DiffuseLight>(light_tex);
-    scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.0f, 2.0f, -1.0f), 0.3f, light_mat));
+        std::make_shared<Sphere>(Vec3(0.5f, 0.5f, -2.0f), 0.5f, metal));
 
     return scene;
 }

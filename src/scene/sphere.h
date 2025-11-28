@@ -8,9 +8,9 @@
 
 inline void get_sphere_uv(const Vec3& p, float& u, float& v) {
     const float theta = std::acos(-p.y);
-    const float phi = std::atan2(-p.z, p.x) + static_cast<float>(3.14159265358979323846);
-    u = phi / (2.0f * static_cast<float>(3.14159265358979323846));
-    v = theta / static_cast<float>(3.14159265358979323846);
+    const float phi = std::atan2(-p.z, p.x) + kPi;
+    u = phi / (2.0f * kPi);
+    v = theta / kPi;
 }
 
 class Sphere : public Hittable {
