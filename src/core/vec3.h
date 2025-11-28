@@ -58,6 +58,10 @@ inline Vec3 operator+(Vec3 lhs, const Vec3& rhs) {
     return lhs;
 }
 
+inline Vec3 operator-(const Vec3& v) {
+    return Vec3(-v.x, -v.y, -v.z);
+}
+
 inline Vec3 operator-(Vec3 lhs, const Vec3& rhs) {
     lhs -= rhs;
     return lhs;
@@ -76,6 +80,10 @@ inline Vec3 operator*(float s, Vec3 v) {
 inline Vec3 operator/(Vec3 v, float s) {
     v /= s;
     return v;
+}
+
+inline Vec3 operator*(const Vec3& a, const Vec3& b) {
+    return Vec3(a.x * b.x, a.y * b.y, a.z * b.z);
 }
 
 inline float dot(const Vec3& a, const Vec3& b) {
@@ -98,3 +106,6 @@ inline Vec3 normalize(const Vec3& v) {
     return v / len;
 }
 
+inline Vec3 reflect(const Vec3& v, const Vec3& n) {
+    return v - 2.0f * dot(v, n) * n;
+}

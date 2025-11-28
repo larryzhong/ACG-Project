@@ -1,4 +1,110 @@
 #pragma once
 
-// Placeholder for material interface and implementations. Implementation pending.
+#include <memory>
+
+#include "core/color.h"
+#include "core/ray.h"
+#include "core/rng.h"
+#include "core/sampling.h"
+#include "scene/hittable.h"
+#include "scene/texture.h"
+
+struct ScatterRecord {
+    Ray scattered;
+    Color attenuation;
+    bool is_specular;
+};
+
+class Material {
+public:
+    virtual ~Material() = default;
+
+    virtual bool scatter(const Ray& r_in,
+                         const HitRecord& hit,
+                         ScatterRecord& srec,
+                         RNG& rng) const = 0;
+
+    virtual Color emitted(const HitRecord& /*hit*/) const {
+        return Color(0.0f);
+    }
+
+    virtual float opacity(const HitRecord& /*hit*/) const {
+        return 1.0f;
+    }
+};
+
+using MaterialPtr = std::shared_ptr<Material>;
+
+class Lambertian : public Material {
+public:
+    explicit Lambertian(const TexturePtr& albedo) : albedo_(albedo) {}
+
+    bool scatter(const Ray& /*r_in*/,
+                 const HitRecord& hit,
+                 ScatterRecord& srec,
+                 RNG& rng) const override {
+        Vec3 scatter_direction = hit.normal + random_unit_vector(rng);
+        if (scatter_direction.length_squared() < 1e-8f) {
+            scatter_direction = hit.normal;
+        }
+
+        srec.scattered = Ray(hit.point, scatter_direction);
+        srec.attenuation =
+            albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+        srec.is_specular = false;
+        return true;
+    }
+
+private:
+    TexturePtr albedo_;
+};
+
+class Metal : public Material {
+public:
+    Metal(const TexturePtr& albedo, float fuzz)
+        : albedo_(albedo), fuzz_(fuzz < 1.0f ? fuzz : 1.0f) {}
+
+    bool scatter(const Ray& r_in,
+                 const HitRecord& hit,
+                 ScatterRecord& srec,
+                 RNG& rng) const override {
+        const Vec3 reflected =
+            reflect(normalize(r_in.direction), hit.normal);
+        const Vec3 perturbed =
+            reflected + fuzz_ * random_in_unit_sphere(rng);
+
+        srec.scattered = Ray(hit.point, perturbed);
+        srec.attenuation =
+            albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+        srec.is_specular = true;
+
+        return dot(srec.scattered.direction, hit.normal) > 0.0f;
+    }
+
+private:
+    TexturePtr albedo_;
+    float fuzz_;
+};
+
+class DiffuseLight : public Material {
+public:
+    explicit DiffuseLight(const TexturePtr& emit) : emit_(emit) {}
+
+    bool scatter(const Ray& /*r_in*/,
+                 const HitRecord& /*hit*/,
+                 ScatterRecord& /*srec*/,
+                 RNG& /*rng*/) const override {
+        return false;
+    }
+
+    Color emitted(const HitRecord& hit) const override {
+        if (!emit_ || !hit.front_face) {
+            return Color(0.0f);
+        }
+        return emit_->value(hit.u, hit.v, hit.point);
+    }
+
+private:
+    TexturePtr emit_;
+};
 
