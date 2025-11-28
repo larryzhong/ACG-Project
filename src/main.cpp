@@ -50,6 +50,8 @@ int main(int argc, char** argv) {
         scene = build_simple_scene_basic();
     }
 
+    scene.build_bvh();
+
     CameraSettings cam_settings;
     cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
     cam_settings.look_from = Vec3(0.0f, 1.0f, 2.0f);

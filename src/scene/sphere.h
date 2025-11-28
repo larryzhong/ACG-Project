@@ -1,7 +1,5 @@
 #pragma once
 
-#include <memory>
-
 #include "core/vec3.h"
 #include "scene/hittable.h"
 #include "scene/material.h"
@@ -46,6 +44,11 @@ public:
         get_sphere_uv(outward_normal, rec.u, rec.v);
         rec.material = material_.get();
         return true;
+    }
+
+    AABB bounding_box() const override {
+        const Vec3 radius_vec(radius_, radius_, radius_);
+        return AABB(center_ - radius_vec, center_ + radius_vec);
     }
 
 private:

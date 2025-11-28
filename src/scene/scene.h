@@ -3,13 +3,29 @@
 #include <memory>
 #include <vector>
 
+#include "scene/bvh.h"
 #include "scene/hittable.h"
 
 class Scene {
 public:
     std::vector<HittablePtr> objects;
+    HittablePtr accel;
+
+    void build_bvh() {
+        if (objects.empty()) {
+            accel.reset();
+            return;
+        }
+
+        std::vector<HittablePtr> copy = objects;
+        accel = std::make_shared<BVHNode>(copy, 0, copy.size());
+    }
 
     bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const {
+        if (accel) {
+            return accel->hit(r, t_min, t_max, rec);
+        }
+
         HitRecord temp_rec;
         bool hit_anything = false;
         float closest_so_far = t_max;

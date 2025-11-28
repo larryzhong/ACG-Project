@@ -4,6 +4,7 @@
 
 #include "core/ray.h"
 #include "core/vec3.h"
+#include "math/aabb.h"
 
 class Material;
 
@@ -27,6 +28,8 @@ public:
     virtual ~Hittable() = default;
 
     virtual bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const = 0;
+
+    virtual AABB bounding_box() const = 0;
 };
 
 using HittablePtr = std::shared_ptr<Hittable>;

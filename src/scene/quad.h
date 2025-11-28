@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "core/vec3.h"
+#include "math/aabb.h"
 #include "scene/hittable.h"
 #include "scene/material.h"
 
@@ -24,6 +25,25 @@ public:
         uv_ = dot(u_, v_);
         vv_ = dot(v_, v_);
         denom_ = uu_ * vv_ - uv_ * uv_;
+
+        const Vec3 p1 = p0_;
+        const Vec3 p2 = p0_ + u_;
+        const Vec3 p3 = p0_ + v_;
+        const Vec3 p4 = p0_ + u_ + v_;
+
+        const float min_x = std::min(std::min(p1.x, p2.x), std::min(p3.x, p4.x));
+        const float min_y = std::min(std::min(p1.y, p2.y), std::min(p3.y, p4.y));
+        const float min_z = std::min(std::min(p1.z, p2.z), std::min(p3.z, p4.z));
+
+        const float max_x = std::max(std::max(p1.x, p2.x), std::max(p3.x, p4.x));
+        const float max_y = std::max(std::max(p1.y, p2.y), std::max(p3.y, p4.y));
+        const float max_z = std::max(std::max(p1.z, p2.z), std::max(p3.z, p4.z));
+
+        // Slightly expand box to avoid zero-thickness issues.
+        const float epsilon = 1e-4f;
+        box_ = AABB(
+            Vec3(min_x - epsilon, min_y - epsilon, min_z - epsilon),
+            Vec3(max_x + epsilon, max_y + epsilon, max_z + epsilon));
     }
 
     bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const override {
@@ -64,6 +84,10 @@ public:
         return true;
     }
 
+    AABB bounding_box() const override {
+        return box_;
+    }
+
 private:
     Vec3 p0_;
     Vec3 u_;
@@ -74,6 +98,6 @@ private:
     float uv_ = 0.0f;
     float vv_ = 0.0f;
     float denom_ = 0.0f;
+    AABB box_;
     MaterialPtr material_;
 };
-
