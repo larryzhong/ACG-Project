@@ -111,3 +111,14 @@ inline Vec3 normalize(const Vec3& v) {
 inline Vec3 reflect(const Vec3& v, const Vec3& n) {
     return v - 2.0f * dot(v, n) * n;
 }
+
+inline Vec3 refract(const Vec3& uv, const Vec3& n, float etai_over_etat) {
+    const float cos_theta = std::fmin(-dot(uv, n), 1.0f);
+    const Vec3 r_out_perp = etai_over_etat * (uv + cos_theta * n);
+    const float k = 1.0f - r_out_perp.length_squared();
+    if (k <= 0.0f) {
+        return Vec3::zero();
+    }
+    const Vec3 r_out_parallel = -std::sqrt(k) * n;
+    return r_out_perp + r_out_parallel;
+}

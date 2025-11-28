@@ -85,21 +85,26 @@ inline Scene build_simple_scene_basic() {
         Vec3(0.0f, 0.0f, lz1 - lz0),
         light));
 
-    // Objects in the box: one diffuse and one metal sphere
+    // Objects in the box: diffuse, metal, checker, and glass spheres.
     auto diffuse_tex = std::make_shared<SolidColor>(Color(0.7f, 0.3f, 0.3f));
     auto diffuse = std::make_shared<Lambertian>(diffuse_tex);
     scene.objects.push_back(
         std::make_shared<Sphere>(Vec3(-0.5f, 0.5f, -2.2f), 0.5f, diffuse));
+
+    auto metal_tex = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
+    auto metal = std::make_shared<Metal>(metal_tex, 0.1f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.5f, 0.5f, -2.0f), 0.5f, metal));
 
     // Textured sphere using the same checker texture for visual verification.
     auto checker_sphere_mat = std::make_shared<Lambertian>(floor_checker);
     scene.objects.push_back(
         std::make_shared<Sphere>(Vec3(0.0f, 1.0f, -2.3f), 0.3f, checker_sphere_mat));
 
-    auto metal_tex = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
-    auto metal = std::make_shared<Metal>(metal_tex, 0.1f);
+    // Glass sphere (Dielectric) to verify refraction.
+    auto glass = std::make_shared<Dielectric>(1.5f);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.5f, 0.5f, -2.0f), 0.5f, metal));
+        std::make_shared<Sphere>(Vec3(0.0f, 0.5f, -1.4f), 0.5f, glass));
 
     return scene;
 }
