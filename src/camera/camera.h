@@ -38,6 +38,9 @@ private:
     Vec3 lower_left_corner_;
     Vec3 horizontal_;
     Vec3 vertical_;
+    Vec3 u_;
+    Vec3 v_;
+    float lens_radius_;
 };
 
 inline Camera::Camera(const CameraSettings& settings) {
@@ -57,11 +60,32 @@ inline Camera::Camera(const CameraSettings& settings) {
     vertical_ = focus_dist * viewport_height * v;
     lower_left_corner_ =
         origin_ - horizontal_ / 2.0f - vertical_ / 2.0f - focus_dist * w;
+
+    u_ = u;
+    v_ = v;
+    lens_radius_ = settings.aperture * 0.5f;
 }
 
-inline Ray Camera::generate_ray(float s, float t, RNG& /*rng*/) const {
+inline Ray Camera::generate_ray(float s, float t, RNG& rng) const {
+    Vec3 ray_origin = origin_;
+
+    if (lens_radius_ > 0.0f) {
+        // Sample a point on the lens disk for depth-of-field.
+        float x, y;
+        for (;;) {
+            const float rx = 2.0f * rng.uniform() - 1.0f;
+            const float ry = 2.0f * rng.uniform() - 1.0f;
+            if (rx * rx + ry * ry < 1.0f) {
+                x = rx;
+                y = ry;
+                break;
+            }
+        }
+        const Vec3 offset = lens_radius_ * (x * u_ + y * v_);
+        ray_origin = origin_ + offset;
+    }
+
     const Vec3 direction =
-        lower_left_corner_ + s * horizontal_ + t * vertical_ - origin_;
-    return Ray(origin_, direction);
+        lower_left_corner_ + s * horizontal_ + t * vertical_ - ray_origin;
+    return Ray(ray_origin, direction);
 }
-

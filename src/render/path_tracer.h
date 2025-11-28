@@ -65,12 +65,11 @@ inline void render_image(const Scene& scene,
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             Color pixel_color(0.0f);
-
             for (int s = 0; s < samples_per_pixel; ++s) {
-                const float u =
-                    static_cast<float>(x) / static_cast<float>(width - 1);
-                const float v =
-                    static_cast<float>(y) / static_cast<float>(height - 1);
+                const float u = (static_cast<float>(x) + rng.uniform()) /
+                                static_cast<float>(width - 1);
+                const float v = (static_cast<float>(y) + rng.uniform()) /
+                                static_cast<float>(height - 1);
 
                 Ray r = camera.generate_ray(u, v, rng);
                 pixel_color += integrator.Li(r, scene, rng, 0);
@@ -81,4 +80,3 @@ inline void render_image(const Scene& scene,
         }
     }
 }
-
