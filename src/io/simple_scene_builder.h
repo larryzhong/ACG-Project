@@ -97,26 +97,21 @@ inline Scene build_simple_scene_basic() {
     scene.objects.push_back(point_light_sphere);
     scene.lights.add_point_light(point_light_sphere);
 
-    // Objects in the box: diffuse, metal, checker, and glass spheres.
-    auto diffuse_tex = std::make_shared<SolidColor>(Color(0.7f, 0.3f, 0.3f));
-    auto diffuse = std::make_shared<Lambertian>(diffuse_tex);
-    scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(-0.5f, 0.5f, -2.2f), 0.5f, diffuse));
-
+    // Objects in the box: metallic, glass, and textured spheres.
     auto metal_tex = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
     auto metal = std::make_shared<Metal>(metal_tex, 0.1f);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.5f, 0.5f, -2.0f), 0.5f, metal));
+        std::make_shared<Sphere>(Vec3(-0.6f, 0.5f, -2.1f), 0.5f, metal));
+
+    // Glass sphere (Dielectric) on the right side of the floor.
+    auto glass = std::make_shared<Dielectric>(1.5f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.6f, 0.5f, -2.0f), 0.5f, glass));
 
     // Textured sphere using the same checker texture for visual verification.
     auto checker_sphere_mat = std::make_shared<Lambertian>(floor_checker);
     scene.objects.push_back(
         std::make_shared<Sphere>(Vec3(0.0f, 1.0f, -2.3f), 0.3f, checker_sphere_mat));
-
-    // Glass sphere (Dielectric) to verify refraction.
-    auto glass = std::make_shared<Dielectric>(1.5f);
-    scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.0f, 0.5f, -1.4f), 0.5f, glass));
 
     // Moving sphere for motion blur: travels diagonally during the shutter interval.
     auto moving_tex = std::make_shared<SolidColor>(Color(0.3f, 0.6f, 0.9f));
@@ -137,7 +132,7 @@ inline Scene build_simple_scene_basic() {
     const float ax = 0.0f;
 
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(ax - 0.001f, y0, az0),
+        Vec3(ax, y0, az0),
         Vec3(0.0f, 0.0f, az1 - az0),
         Vec3(0.0f, y1 - y0, 0.0f),
         alpha_mat));
