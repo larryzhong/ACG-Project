@@ -30,17 +30,32 @@ public:
             return (1.0f - t) * white + t * blue;
         }
 
-        Color emitted(0.0f);
-        if (rec.material) {
-            emitted = rec.material->emitted(rec);
+        const Material* material = rec.material;
+
+        if (material) {
+            const float op = material->opacity(rec);
+            if (op < 1.0f) {
+                const float sample = rng.uniform();
+                if (sample > op) {
+                    Ray continued_ray(rec.point + 0.001f * r.direction,
+                                      r.direction,
+                                      r.time);
+                    return Li(continued_ray, scene, rng, depth + 1);
+                }
+            }
         }
 
-        if (!rec.material) {
+        Color emitted(0.0f);
+        if (material) {
+            emitted = material->emitted(rec);
+        }
+
+        if (!material) {
             return emitted;
         }
 
         ScatterRecord srec;
-        if (!rec.material->scatter(r, rec, srec, rng)) {
+        if (!material->scatter(r, rec, srec, rng)) {
             return emitted;
         }
 

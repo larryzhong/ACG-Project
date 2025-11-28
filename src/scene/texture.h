@@ -58,3 +58,24 @@ private:
     TexturePtr odd_;
     float scale_ = 1.0f;
 };
+
+class AlphaCheckerTexture : public Texture {
+public:
+    AlphaCheckerTexture() = default;
+
+    explicit AlphaCheckerTexture(float scale) : scale_(scale) {}
+
+    Color value(float /*u*/, float /*v*/, const Vec3& /*p*/) const override {
+        return Color(1.0f);
+    }
+
+    float alpha(float /*u*/, float /*v*/, const Vec3& p) const override {
+        const float sx = std::floor(scale_ * p.x);
+        const float sz = std::floor(scale_ * p.z);
+        const int sum = static_cast<int>(sx + sz);
+        return (sum & 1) ? 0.0f : 1.0f;
+    }
+
+private:
+    float scale_ = 1.0f;
+};

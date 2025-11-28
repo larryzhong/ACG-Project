@@ -56,6 +56,13 @@ public:
         return true;
     }
 
+    float opacity(const HitRecord& hit) const override {
+        if (!albedo_) {
+            return 1.0f;
+        }
+        return albedo_->alpha(hit.u, hit.v, hit.point);
+    }
+
 private:
     TexturePtr albedo_;
 };

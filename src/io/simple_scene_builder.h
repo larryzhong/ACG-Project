@@ -129,5 +129,18 @@ inline Scene build_simple_scene_basic() {
         0.3f,
         moving_mat));
 
+    // Alpha-shadow quad between light and back wall using an alpha checker texture.
+    auto alpha_tex = std::make_shared<AlphaCheckerTexture>(6.0f);
+    auto alpha_mat = std::make_shared<Lambertian>(alpha_tex);
+    const float az0 = -2.6f;
+    const float az1 = -1.4f;
+    const float ax = 0.0f;
+
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(ax - 0.001f, y0, az0),
+        Vec3(0.0f, 0.0f, az1 - az0),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        alpha_mat));
+
     return scene;
 }
