@@ -41,6 +41,8 @@ private:
     Vec3 u_;
     Vec3 v_;
     float lens_radius_;
+    float time0_;
+    float time1_;
 };
 
 inline Camera::Camera(const CameraSettings& settings) {
@@ -64,6 +66,8 @@ inline Camera::Camera(const CameraSettings& settings) {
     u_ = u;
     v_ = v;
     lens_radius_ = settings.aperture * 0.5f;
+    time0_ = settings.t0;
+    time1_ = settings.t1;
 }
 
 inline Ray Camera::generate_ray(float s, float t, RNG& rng) const {
@@ -85,7 +89,10 @@ inline Ray Camera::generate_ray(float s, float t, RNG& rng) const {
         ray_origin = origin_ + offset;
     }
 
+    const float time =
+        time0_ + rng.uniform() * (time1_ - time0_);
+
     const Vec3 direction =
         lower_left_corner_ + s * horizontal_ + t * vertical_ - ray_origin;
-    return Ray(ray_origin, direction);
+    return Ray(ray_origin, direction, time);
 }

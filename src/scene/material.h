@@ -40,7 +40,7 @@ class Lambertian : public Material {
 public:
     explicit Lambertian(const TexturePtr& albedo) : albedo_(albedo) {}
 
-    bool scatter(const Ray& /*r_in*/,
+    bool scatter(const Ray& r_in,
                  const HitRecord& hit,
                  ScatterRecord& srec,
                  RNG& rng) const override {
@@ -49,7 +49,7 @@ public:
             scatter_direction = hit.normal;
         }
 
-        srec.scattered = Ray(hit.point, scatter_direction);
+        srec.scattered = Ray(hit.point, scatter_direction, r_in.time);
         srec.attenuation =
             albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
         srec.is_specular = false;
@@ -74,7 +74,7 @@ public:
         const Vec3 perturbed =
             reflected + fuzz_ * random_in_unit_sphere(rng);
 
-        srec.scattered = Ray(hit.point, perturbed);
+        srec.scattered = Ray(hit.point, perturbed, r_in.time);
         srec.attenuation =
             albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
         srec.is_specular = true;
@@ -139,7 +139,7 @@ public:
             direction = refract(unit_direction, hit.normal, refraction_ratio);
         }
 
-        srec.scattered = Ray(hit.point, direction);
+        srec.scattered = Ray(hit.point, direction, r_in.time);
         return true;
     }
 

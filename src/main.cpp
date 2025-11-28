@@ -20,6 +20,8 @@ int main(int argc, char** argv) {
     int max_depth = 5;
     float aperture = 0.0f;
     float focus_dist = 2.0f;
+    float shutter_open = 0.0f;
+    float shutter_close = 1.0f;
     std::string output = "basic_materials.ppm";
     std::string scene_name = "simple";
 
@@ -41,6 +43,10 @@ int main(int argc, char** argv) {
             aperture = static_cast<float>(std::atof(argv[++i]));
         } else if (arg == "--focus-dist" && i + 1 < argc) {
             focus_dist = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--shutter-open" && i + 1 < argc) {
+            shutter_open = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--shutter-close" && i + 1 < argc) {
+            shutter_close = static_cast<float>(std::atof(argv[++i]));
         }
     }
 
@@ -66,6 +72,8 @@ int main(int argc, char** argv) {
     cam_settings.vertical_fov_deg = 40.0f;
     cam_settings.aperture = aperture;
     cam_settings.focus_dist = focus_dist;
+    cam_settings.t0 = shutter_open;
+    cam_settings.t1 = shutter_close;
 
     Camera camera(cam_settings);
     PathTracer integrator(max_depth);

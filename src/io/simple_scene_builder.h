@@ -4,6 +4,7 @@
 
 #include "core/color.h"
 #include "scene/material.h"
+#include "scene/moving_sphere.h"
 #include "scene/quad.h"
 #include "scene/scene.h"
 #include "scene/sphere.h"
@@ -116,6 +117,17 @@ inline Scene build_simple_scene_basic() {
     auto glass = std::make_shared<Dielectric>(1.5f);
     scene.objects.push_back(
         std::make_shared<Sphere>(Vec3(0.0f, 0.5f, -1.4f), 0.5f, glass));
+
+    // Moving sphere for motion blur: travels diagonally during the shutter interval.
+    auto moving_tex = std::make_shared<SolidColor>(Color(0.3f, 0.6f, 0.9f));
+    auto moving_mat = std::make_shared<Lambertian>(moving_tex);
+    scene.objects.push_back(std::make_shared<MovingSphere>(
+        Vec3(-0.6f, 0.3f, -2.6f),
+        Vec3(0.6f, 0.9f, -1.6f),
+        0.0f,
+        1.0f,
+        0.3f,
+        moving_mat));
 
     return scene;
 }
