@@ -1,3 +1,0 @@
-C:/Users/larry/Documents/THU/ACG/project/build/CMakeFiles/pathtracer.dir
-C:/Users/larry/Documents/THU/ACG/project/build/CMakeFiles/ALL_BUILD.dir
-C:/Users/larry/Documents/THU/ACG/project/build/CMakeFiles/ZERO_CHECK.dir
