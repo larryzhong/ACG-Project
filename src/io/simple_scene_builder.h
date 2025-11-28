@@ -21,8 +21,11 @@ inline Scene build_simple_scene_basic() {
     auto red = std::make_shared<Lambertian>(red_tex);
     auto green = std::make_shared<Lambertian>(green_tex);
 
-    auto light_tex = std::make_shared<SolidColor>(Color(12.0f, 12.0f, 12.0f));
-    auto light = std::make_shared<DiffuseLight>(light_tex);
+    auto area_light_tex = std::make_shared<SolidColor>(Color(12.0f, 12.0f, 12.0f));
+    auto area_light = std::make_shared<DiffuseLight>(area_light_tex);
+
+    auto point_light_tex = std::make_shared<SolidColor>(Color(20.0f, 20.0f, 20.0f));
+    auto point_light = std::make_shared<DiffuseLight>(point_light_tex);
 
     // Room dimensions (Cornell-style box)
     const float x0 = -1.0f;
@@ -79,11 +82,19 @@ inline Scene build_simple_scene_basic() {
     const float lz1 = -1.5f;
     const float ly = y1 - 0.01f;
 
-    scene.objects.push_back(std::make_shared<Quad>(
+    auto ceiling_light = std::make_shared<Quad>(
         Vec3(lx0, ly, lz0),
         Vec3(lx1 - lx0, 0.0f, 0.0f),
         Vec3(0.0f, 0.0f, lz1 - lz0),
-        light));
+        area_light);
+    scene.objects.push_back(ceiling_light);
+    scene.lights.add_area_light(ceiling_light);
+
+    // Small bright emissive sphere acting as a point light.
+    auto point_light_sphere =
+        std::make_shared<Sphere>(Vec3(0.0f, 1.6f, -1.8f), 0.07f, point_light);
+    scene.objects.push_back(point_light_sphere);
+    scene.lights.add_point_light(point_light_sphere);
 
     // Objects in the box: diffuse, metal, checker, and glass spheres.
     auto diffuse_tex = std::make_shared<SolidColor>(Color(0.7f, 0.3f, 0.3f));

@@ -5,11 +5,13 @@
 
 #include "scene/bvh.h"
 #include "scene/hittable.h"
+#include "scene/light.h"
 
 class Scene {
 public:
     std::vector<HittablePtr> objects;
     HittablePtr accel;
+    LightCollection lights;
 
     void build_bvh() {
         if (objects.empty()) {
