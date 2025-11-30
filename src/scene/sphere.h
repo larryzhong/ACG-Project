@@ -18,6 +18,18 @@ public:
     Sphere(const Vec3& center, float radius, const MaterialPtr& material)
         : center_(center), radius_(radius), material_(material) {}
 
+    const Vec3& center() const {
+        return center_;
+    }
+
+    float radius() const {
+        return radius_;
+    }
+
+    const Material* material() const {
+        return material_.get();
+    }
+
     bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const override {
         const Vec3 oc = r.origin - center_;
         const float a = dot(r.direction, r.direction);

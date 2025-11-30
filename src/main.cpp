@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     int samples_per_pixel = 16;
     int max_depth = 5;
     float aperture = 0.0f;
-    float focus_dist = 2.0f;
+    float focus_dist = 0.0f;
     float shutter_open = 0.0f;
     float shutter_close = 1.0f;
     std::string output = "basic_materials.ppm";
@@ -66,11 +66,15 @@ int main(int argc, char** argv) {
 
     CameraSettings cam_settings;
     cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
-    cam_settings.look_from = Vec3(0.0f, 1.0f, 2.0f);
+    cam_settings.look_from = Vec3(0.0f, 1.0f, -1.05f);
     cam_settings.look_at = Vec3(0.0f, 1.0f, -2.0f);
     cam_settings.up = Vec3(0.0f, 1.0f, 0.0f);
-    cam_settings.vertical_fov_deg = 40.0f;
+    cam_settings.vertical_fov_deg = 90.0f;
     cam_settings.aperture = aperture;
+    if (focus_dist <= 0.0f) {
+        const Vec3 diff = cam_settings.look_from - cam_settings.look_at;
+        focus_dist = diff.length();
+    }
     cam_settings.focus_dist = focus_dist;
     cam_settings.t0 = shutter_open;
     cam_settings.t1 = shutter_close;
@@ -80,9 +84,13 @@ int main(int argc, char** argv) {
 
     render_image(scene, camera, integrator, film, samples_per_pixel);
 
-    write_ppm(output, film);
-
-    std::cout << "Wrote image to " << output << "\n";
+    if (output.size() >= 4 && output.substr(output.size() - 4) == ".png") {
+        write_png(output, film);
+        std::cout << "Wrote PNG image to " << output << "\n";
+    } else {
+        write_ppm(output, film);
+        std::cout << "Wrote PPM image to " << output << "\n";
+    }
 
     return 0;
 }

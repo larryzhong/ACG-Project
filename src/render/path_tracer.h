@@ -4,14 +4,119 @@
 #include "core/color.h"
 #include "core/ray.h"
 #include "core/rng.h"
+#include "core/sampling.h"
 #include "render/film.h"
 #include "render/integrator.h"
 #include "scene/material.h"
 #include "scene/scene.h"
+#include "scene/quad.h"
+#include "scene/sphere.h"
 
 class PathTracer : public Integrator {
 public:
     explicit PathTracer(int max_depth) : max_depth_(max_depth) {}
+
+    Color estimate_direct_lighting(const HitRecord& rec,
+                                   const Scene& scene,
+                                   const Ray& in_ray,
+                                   RNG& rng) const {
+        Color result(0.0f);
+
+        const auto& lights = scene.lights.lights();
+        if (lights.empty()) {
+            return result;
+        }
+
+        const Vec3 p = rec.point;
+        const Vec3 n = rec.normal;
+
+        for (const auto& light : lights) {
+            if (!light.shape) {
+                continue;
+            }
+
+            const Hittable* shape = light.shape.get();
+
+            Vec3 light_pos;
+            Vec3 light_normal;
+            float pdf_area = 0.0f;
+            const Material* light_material = nullptr;
+
+            if (const auto* sphere = dynamic_cast<const Sphere*>(shape)) {
+                const float radius = sphere->radius();
+                if (radius <= 0.0f) {
+                    continue;
+                }
+
+                const Vec3 d = random_unit_vector(rng);
+                light_pos = sphere->center() + radius * d;
+                light_normal = d;
+
+                const float area = 4.0f * kPi * radius * radius;
+                pdf_area = area > 0.0f ? 1.0f / area : 0.0f;
+                light_material = sphere->material();
+            } else if (const auto* quad = dynamic_cast<const Quad*>(shape)) {
+                const float su = rng.uniform();
+                const float sv = rng.uniform();
+
+                light_pos = quad->p0() + su * quad->u() + sv * quad->v();
+                light_normal = quad->normal();
+
+                const float area = quad->area();
+                pdf_area = area > 0.0f ? 1.0f / area : 0.0f;
+                light_material = quad->material();
+            } else {
+                continue;
+            }
+
+            if (!light_material || pdf_area <= 0.0f) {
+                continue;
+            }
+
+            Vec3 to_light = light_pos - p;
+            const float dist_squared = to_light.length_squared();
+            if (dist_squared <= 0.0f) {
+                continue;
+            }
+
+            const float dist = std::sqrt(dist_squared);
+            const Vec3 wi = to_light / dist;
+
+            const float cos_surface = dot(n, wi);
+            const float cos_light = dot(light_normal, -wi);
+            if (cos_surface <= 0.0f || cos_light <= 0.0f) {
+                continue;
+            }
+
+            const float shadow_epsilon = 0.001f;
+            Ray shadow_ray(p + shadow_epsilon * wi, wi, in_ray.time);
+            HitRecord shadow_rec;
+            if (scene.hit(shadow_ray, 0.001f, dist - shadow_epsilon, shadow_rec)) {
+                continue;
+            }
+
+            HitRecord light_rec;
+            light_rec.point = light_pos;
+            light_rec.normal = light_normal;
+            light_rec.front_face = true;
+            light_rec.u = 0.0f;
+            light_rec.v = 0.0f;
+
+            const Color emitted = light_material->emitted(light_rec);
+            if (emitted.x <= 0.0f && emitted.y <= 0.0f && emitted.z <= 0.0f) {
+                continue;
+            }
+
+            const float geometry = (cos_surface * cos_light) / dist_squared;
+            const float weight = geometry / pdf_area;
+
+            result += emitted * weight;
+        }
+
+        // Lambertian BRDF factor (albedo / pi); albedo is applied outside via
+        // srec.attenuation, so we include only the 1 / pi here.
+        return (1.0f / kPi) * result;
+    }
 
     Color Li(const Ray& r,
              const Scene& scene,
@@ -23,11 +128,7 @@ public:
 
         HitRecord rec;
         if (!scene.hit(r, 0.001f, 1e30f, rec)) {
-            const Vec3 unit_direction = normalize(r.direction);
-            const float t = 0.5f * (unit_direction.y + 1.0f);
-            const Color white(1.0f, 1.0f, 1.0f);
-            const Color blue(0.5f, 0.7f, 1.0f);
-            return (1.0f - t) * white + t * blue;
+            return Color(0.0f); 
         }
 
         const Material* material = rec.material;
@@ -59,8 +160,17 @@ public:
             return emitted;
         }
 
-        return emitted + srec.attenuation *
-                              Li(srec.scattered, scene, rng, depth + 1);
+        Color direct(0.0f);
+        if (!srec.is_specular) {
+            direct = srec.attenuation *
+                     estimate_direct_lighting(rec, scene, r, rng);
+        }
+
+        const Color indirect =
+            srec.attenuation *
+            Li(srec.scattered, scene, rng, depth + 1);
+
+        return emitted + direct + indirect;
     }
 
 private:
@@ -83,8 +193,8 @@ inline void render_image(const Scene& scene,
             for (int s = 0; s < samples_per_pixel; ++s) {
                 const float u = (static_cast<float>(x) + rng.uniform()) /
                                 static_cast<float>(width - 1);
-                const float v = (static_cast<float>(y) + rng.uniform()) /
-                                static_cast<float>(height - 1);
+                const float v = 1.0f - ((static_cast<float>(y) + rng.uniform()) /
+                                        static_cast<float>(height - 1));
 
                 Ray r = camera.generate_ray(u, v, rng);
                 pixel_color += integrator.Li(r, scene, rng, 0);

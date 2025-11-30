@@ -75,6 +75,13 @@ inline Scene build_simple_scene_basic() {
         Vec3(0.0f, 0.0f, z1 - z0),
         Vec3(0.0f, y1 - y0, 0.0f),
         green));
+    
+    // Front wall (z = z1) - white
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z1),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        white));
 
     // Ceiling light quad (small emissive patch)
     const float lx0 = -0.5f;
@@ -101,12 +108,12 @@ inline Scene build_simple_scene_basic() {
     auto metal_tex = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
     auto metal = std::make_shared<Metal>(metal_tex, 0.1f);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(-0.6f, 0.5f, -2.1f), 0.5f, metal));
+        std::make_shared<Sphere>(Vec3(-0.45f, 0.5f, -2.1f), 0.3f, metal));
 
     // Glass sphere (Dielectric) on the right side of the floor.
     auto glass = std::make_shared<Dielectric>(1.5f);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.6f, 0.5f, -2.0f), 0.5f, glass));
+        std::make_shared<Sphere>(Vec3(0.45f, 0.5f, -2.0f), 0.3f, glass));
 
     // Textured sphere using the same checker texture for visual verification.
     auto checker_sphere_mat = std::make_shared<Lambertian>(floor_checker);
@@ -116,13 +123,13 @@ inline Scene build_simple_scene_basic() {
     // Moving sphere for motion blur: travels diagonally during the shutter interval.
     auto moving_tex = std::make_shared<SolidColor>(Color(0.3f, 0.6f, 0.9f));
     auto moving_mat = std::make_shared<Lambertian>(moving_tex);
-    scene.objects.push_back(std::make_shared<MovingSphere>(
-        Vec3(-0.6f, 0.3f, -2.6f),
-        Vec3(0.6f, 0.9f, -1.6f),
-        0.0f,
-        1.0f,
-        0.3f,
-        moving_mat));
+    // scene.objects.push_back(std::make_shared<MovingSphere>(
+    //     Vec3(-0.6f, 0.3f, -2.6f),
+    //     Vec3(0.6f, 0.9f, -1.6f),
+    //     0.0f,
+    //     1.0f,
+    //     0.3f,
+    //     moving_mat));
 
     // Alpha-shadow quad between light and back wall using an alpha checker texture.
     auto alpha_tex = std::make_shared<AlphaCheckerTexture>(6.0f);

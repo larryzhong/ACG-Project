@@ -46,6 +46,30 @@ public:
             Vec3(max_x + epsilon, max_y + epsilon, max_z + epsilon));
     }
 
+    const Vec3& p0() const {
+        return p0_;
+    }
+
+    const Vec3& u() const {
+        return u_;
+    }
+
+    const Vec3& v() const {
+        return v_;
+    }
+
+    const Vec3& normal() const {
+        return normal_;
+    }
+
+    float area() const {
+        return cross(u_, v_).length();
+    }
+
+    const Material* material() const {
+        return material_.get();
+    }
+
     bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const override {
         const float denom = dot(normal_, r.direction);
         if (std::fabs(denom) < 1e-8f) {
