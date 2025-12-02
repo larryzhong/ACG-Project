@@ -66,10 +66,10 @@ int main(int argc, char** argv) {
 
     CameraSettings cam_settings;
     cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
-    cam_settings.look_from = Vec3(0.0f, 1.0f, -1.05f);
-    cam_settings.look_at = Vec3(0.0f, 1.0f, -2.0f);
+    cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
+    cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
     cam_settings.up = Vec3(0.0f, 1.0f, 0.0f);
-    cam_settings.vertical_fov_deg = 90.0f;
+    cam_settings.vertical_fov_deg = 40.0f;
     cam_settings.aperture = aperture;
     if (focus_dist <= 0.0f) {
         const Vec3 diff = cam_settings.look_from - cam_settings.look_at;

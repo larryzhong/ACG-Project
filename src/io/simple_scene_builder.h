@@ -13,7 +13,7 @@
 inline Scene build_simple_scene_basic() {
     Scene scene;
 
-    // Materials
+    // --- Materials ---
     auto white_tex = std::make_shared<SolidColor>(Color(0.73f, 0.73f, 0.73f));
     auto red_tex = std::make_shared<SolidColor>(Color(0.65f, 0.05f, 0.05f));
     auto green_tex = std::make_shared<SolidColor>(Color(0.12f, 0.45f, 0.15f));
@@ -22,127 +22,113 @@ inline Scene build_simple_scene_basic() {
     auto red = std::make_shared<Lambertian>(red_tex);
     auto green = std::make_shared<Lambertian>(green_tex);
 
-    auto area_light_tex = std::make_shared<SolidColor>(Color(12.0f, 12.0f, 12.0f));
-    auto area_light = std::make_shared<DiffuseLight>(area_light_tex);
+    // Main light (bright)
+    auto light_tex = std::make_shared<SolidColor>(Color(15.0f, 15.0f, 15.0f));
+    auto light_mat = std::make_shared<DiffuseLight>(light_tex);
 
-    auto point_light_tex = std::make_shared<SolidColor>(Color(20.0f, 20.0f, 20.0f));
-    auto point_light = std::make_shared<DiffuseLight>(point_light_tex);
+    // Fill light (dimmer) for the area behind the camera
+    auto fill_light_tex = std::make_shared<SolidColor>(Color(5.0f, 5.0f, 5.0f));
+    auto fill_light_mat = std::make_shared<DiffuseLight>(fill_light_tex);
 
-    // Room dimensions (Cornell-style box)
-    const float x0 = -1.0f;
-    const float x1 = 1.0f;
-    const float y0 = 0.0f;
-    const float y1 = 2.0f;
-    const float z0 = -3.0f;
-    const float z1 = -1.0f;
+    // --- Geometry ---
+    // Scene extends from z = -2 (back of box) to z = 4 (behind camera)
+    
+    const float x0 = -1.0f, x1 = 1.0f;
+    const float y0 = 0.0f,  y1 = 2.0f;
+    const float z_box_back = -2.0f;
+    const float z_studio_back = 4.0f; // Wall behind camera
 
-    // Checker floor (y = y0)
+    // 1. FLOOR (Continuous checkerboard)
     auto floor_even = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
-    auto floor_odd = std::make_shared<SolidColor>(Color(0.2f, 0.2f, 0.2f));
-    auto floor_checker = std::make_shared<CheckerTexture>(floor_even, floor_odd, 4.0f);
+    auto floor_odd = std::make_shared<SolidColor>(Color(0.3f, 0.3f, 0.3f));
+    auto floor_checker = std::make_shared<CheckerTexture>(floor_even, floor_odd, 2.0f);
     auto floor_mat = std::make_shared<Lambertian>(floor_checker);
 
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(x0, y0, z0),
+        Vec3(x0, y0, z_box_back),
         Vec3(x1 - x0, 0.0f, 0.0f),
-        Vec3(0.0f, 0.0f, z1 - z0),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back), // Covers entire depth
         floor_mat));
 
-    // Ceiling (y = y1)
+    // 2. CEILING (Continuous white)
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(x0, y1, z0),
+        Vec3(x0, y1, z_box_back),
         Vec3(x1 - x0, 0.0f, 0.0f),
-        Vec3(0.0f, 0.0f, z1 - z0),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back),
         white));
 
-    // Back wall (z = z0)
+    // 3. WALLS
+    
+    // Back wall (White)
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(x0, y0, z0),
+        Vec3(x0, y0, z_box_back),
         Vec3(x1 - x0, 0.0f, 0.0f),
         Vec3(0.0f, y1 - y0, 0.0f),
         white));
 
-    // Left wall (x = x0) - red
+    // [FIX] Left wall (Red) - EXTENDED
+    // Now stretches from the back of the box (-2) all the way to behind camera (4)
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(x0, y0, z1),
-        Vec3(0.0f, 0.0f, z0 - z1),
+        Vec3(x0, y0, z_studio_back),
+        Vec3(0.0f, 0.0f, z_box_back - z_studio_back), // Vector pointing to -Z
         Vec3(0.0f, y1 - y0, 0.0f),
         red));
 
-    // Right wall (x = x1) - green
+    // [FIX] Right wall (Green) - EXTENDED
+    // Now stretches from the back of the box (-2) all the way to behind camera (4)
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(x1, y0, z0),
-        Vec3(0.0f, 0.0f, z1 - z0),
+        Vec3(x1, y0, z_box_back),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back), // Vector pointing to +Z
         Vec3(0.0f, y1 - y0, 0.0f),
         green));
-    
-    // Front wall (z = z1) - white
+
+    // Studio Back Wall (Behind Camera - White)
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(x0, y0, z1),
+        Vec3(x0, y0, z_studio_back),
         Vec3(x1 - x0, 0.0f, 0.0f),
-        Vec3(0.0f, y1 - y0, 0.0f),
+        Vec3(0.0f, y1 - y0, 0.0f), // Normal points to -Z (into scene)
         white));
 
-    // Ceiling light quad (small emissive patch)
-    const float lx0 = -0.5f;
-    const float lx1 = 0.5f;
-    const float lz0 = -2.5f;
-    const float lz1 = -1.5f;
-    const float ly = y1 - 0.01f;
+    // 4. LIGHTS
+    // Main Ceiling Light (Inside Box)
+    const float lx0 = -0.3f, lx1 = 0.3f;
+    const float lz0 = -1.3f, lz1 = -0.7f;
+    const float ly = y1 - 0.001f;
 
     auto ceiling_light = std::make_shared<Quad>(
         Vec3(lx0, ly, lz0),
         Vec3(lx1 - lx0, 0.0f, 0.0f),
         Vec3(0.0f, 0.0f, lz1 - lz0),
-        area_light);
+        light_mat);
     scene.objects.push_back(ceiling_light);
     scene.lights.add_area_light(ceiling_light);
 
-    // Small bright emissive sphere acting as a point light.
-    auto point_light_sphere =
-        std::make_shared<Sphere>(Vec3(0.0f, 1.6f, -1.8f), 0.07f, point_light);
-    scene.objects.push_back(point_light_sphere);
-    scene.lights.add_point_light(point_light_sphere);
+    // Fill Light (Behind Camera)
+    auto studio_light = std::make_shared<Quad>(
+        Vec3(lx0, ly, 1.8f),
+        Vec3(lx1 - lx0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, 0.6f),
+        fill_light_mat);
+    scene.objects.push_back(studio_light);
+    scene.lights.add_area_light(studio_light);
 
-    // Objects in the box: metallic, glass, and textured spheres.
-    auto metal_tex = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
-    auto metal = std::make_shared<Metal>(metal_tex, 0.1f);
+    // --- Objects ---
+    // Metal sphere (left side)
+    auto metal_tex = std::make_shared<SolidColor>(Color(0.9f, 0.9f, 0.9f));
+    auto metal = std::make_shared<Metal>(metal_tex, 0.05f);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(-0.45f, 0.5f, -2.1f), 0.3f, metal));
+        std::make_shared<Sphere>(Vec3(-0.5f, 0.35f, -0.7f), 0.35f, metal));
 
-    // Glass sphere (Dielectric) on the right side of the floor.
+    // Glass sphere (right side)
     auto glass = std::make_shared<Dielectric>(1.5f);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.45f, 0.5f, -2.0f), 0.3f, glass));
+        std::make_shared<Sphere>(Vec3(0.5f, 0.35f, -1.0f), 0.35f, glass));
 
-    // Textured sphere using the same checker texture for visual verification.
-    auto checker_sphere_mat = std::make_shared<Lambertian>(floor_checker);
+    // Small diffuse sphere (center back)
+    auto blue_tex = std::make_shared<SolidColor>(Color(0.2f, 0.3f, 0.7f));
+    auto blue_mat = std::make_shared<Lambertian>(blue_tex);
     scene.objects.push_back(
-        std::make_shared<Sphere>(Vec3(0.0f, 1.0f, -2.3f), 0.3f, checker_sphere_mat));
-
-    // Moving sphere for motion blur: travels diagonally during the shutter interval.
-    auto moving_tex = std::make_shared<SolidColor>(Color(0.3f, 0.6f, 0.9f));
-    auto moving_mat = std::make_shared<Lambertian>(moving_tex);
-    // scene.objects.push_back(std::make_shared<MovingSphere>(
-    //     Vec3(-0.6f, 0.3f, -2.6f),
-    //     Vec3(0.6f, 0.9f, -1.6f),
-    //     0.0f,
-    //     1.0f,
-    //     0.3f,
-    //     moving_mat));
-
-    // Alpha-shadow quad between light and back wall using an alpha checker texture.
-    auto alpha_tex = std::make_shared<AlphaCheckerTexture>(6.0f);
-    auto alpha_mat = std::make_shared<Lambertian>(alpha_tex);
-    const float az0 = -2.6f;
-    const float az1 = -1.4f;
-    const float ax = 0.0f;
-
-    scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(ax, y0, az0),
-        Vec3(0.0f, 0.0f, az1 - az0),
-        Vec3(0.0f, y1 - y0, 0.0f),
-        alpha_mat));
+        std::make_shared<Sphere>(Vec3(0.0f, 0.25f, -1.5f), 0.25f, blue_mat));
 
     return scene;
 }
