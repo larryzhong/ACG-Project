@@ -73,7 +73,7 @@ public:
 
             Vec3 to_light = light_pos - p;
             const float dist_squared = to_light.length_squared();
-            if (dist_squared <= 0.0f) continue;
+            if (dist_squared <= 0.000001f) continue;
 
             const float dist = std::sqrt(dist_squared);
             const Vec3 wi = to_light / dist;
@@ -193,18 +193,19 @@ private:
             return emitted;
         }
 
-        float rr_prob = 1.0f;
-        if (depth > 3) {
-            rr_prob = 0.8f;
-            if (rng.uniform() >= rr_prob) {
-                return emitted;
-            }
-        }
-
         Color direct(0.0f);
         if (!srec.is_specular) {
             direct = srec.attenuation *
                     estimate_direct_lighting(rec, scene, r, rng);
+        }
+
+        float rr_prob = 1.0f;
+        if (depth > 3) {
+            float max_attenuation = std::max({srec.attenuation.x, srec.attenuation.y, srec.attenuation.z});
+            rr_prob = std::max(0.05f, std::min(max_attenuation, 0.95f));
+            if (rng.uniform() >= rr_prob) {
+                return emitted + direct;
+            }
         }
 
         const bool next_count_emitted = srec.is_specular;
@@ -213,7 +214,7 @@ private:
             srec.attenuation *
             Li_internal(srec.scattered, scene, rng, depth + 1, next_count_emitted);
 
-        return emitted + (direct + indirect) / rr_prob;
+        return emitted + direct + indirect / rr_prob;
     }
 
     int max_depth_;
