@@ -14,7 +14,7 @@ struct RNG {
         // Parameters from Numerical Recipes.
         state = state * 6364136223846793005ull + 1u;
         const std::uint32_t bits = static_cast<std::uint32_t>(state >> 32);
-        return static_cast<float>(bits) / static_cast<float>(0xFFFFFFFFu);
+        return bits * 0x1p-32f;
     }
 };
 

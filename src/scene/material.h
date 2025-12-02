@@ -144,6 +144,9 @@ public:
             direction = reflect(unit_direction, hit.normal);
         } else {
             direction = refract(unit_direction, hit.normal, refraction_ratio);
+            if (direction.length_squared() < 1e-10f) {
+                direction = reflect(unit_direction, hit.normal);
+            }
         }
 
         srec.scattered = Ray(hit.point, direction, r_in.time);
