@@ -5,7 +5,10 @@
 #include "scene/material.h"
 
 inline void get_sphere_uv(const Vec3& p, float& u, float& v) {
-    const float theta = std::acos(-p.y);
+    float y = p.y;
+    if (y < -1.0f) y = -1.0f;
+    if (y > 1.0f) y = 1.0f;
+    const float theta = std::acos(-y);
     const float phi = std::atan2(-p.z, p.x) + kPi;
     u = phi / (2.0f * kPi);
     v = theta / kPi;
