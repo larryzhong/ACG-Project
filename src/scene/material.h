@@ -9,6 +9,7 @@
 #include "core/sampling.h"
 #include "scene/hittable.h"
 #include "scene/texture.h"
+#include "math/onb.h"
 
 struct ScatterRecord {
     Ray scattered;
@@ -41,13 +42,12 @@ public:
     explicit Lambertian(const TexturePtr& albedo) : albedo_(albedo) {}
 
     bool scatter(const Ray& r_in,
-                 const HitRecord& hit,
-                 ScatterRecord& srec,
-                 RNG& rng) const override {
-        Vec3 scatter_direction = hit.normal + random_unit_vector(rng);
-        if (scatter_direction.length_squared() < 1e-8f) {
-            scatter_direction = hit.normal;
-        }
+                const HitRecord& hit,
+                ScatterRecord& srec,
+                RNG& rng) const override {
+        ONB uvw;
+        uvw.build_from_w(hit.normal);
+        Vec3 scatter_direction = uvw.local(random_cosine_direction(rng));
 
         srec.scattered = Ray(hit.point, scatter_direction, r_in.time);
         srec.attenuation =

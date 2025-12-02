@@ -26,3 +26,17 @@ inline Vec3 random_in_hemisphere(const Vec3& normal, RNG& rng) {
     }
     return in_sphere;
 }
+
+inline Vec3 random_cosine_direction(RNG& rng) {
+    const float r1 = rng.uniform();
+    const float r2 = rng.uniform();
+
+    const float phi = 2.0f * kPi * r1;
+    const float sqrt_r2 = std::sqrt(r2);
+
+    const float x = std::cos(phi) * sqrt_r2;
+    const float y = std::sin(phi) * sqrt_r2;
+    const float z = std::sqrt(1.0f - r2);
+
+    return Vec3(x, y, z);
+}

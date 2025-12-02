@@ -151,10 +151,10 @@ public:
 
 private:
     Color Li_internal(const Ray& r,
-                      const Scene& scene,
-                      RNG& rng,
-                      int depth,
-                      bool count_emitted) const {
+                    const Scene& scene,
+                    RNG& rng,
+                    int depth,
+                    bool count_emitted) const {
         if (depth >= max_depth_) {
             return Color(0.0f);
         }
@@ -172,8 +172,8 @@ private:
                 const float sample = rng.uniform();
                 if (sample > op) {
                     Ray continued_ray(rec.point + 0.001f * r.direction,
-                                      r.direction,
-                                      r.time);
+                                    r.direction,
+                                    r.time);
                     return Li_internal(continued_ray, scene, rng, depth, count_emitted);
                 }
             }
@@ -193,10 +193,18 @@ private:
             return emitted;
         }
 
+        float rr_prob = 1.0f;
+        if (depth > 3) {
+            rr_prob = 0.8f;
+            if (rng.uniform() >= rr_prob) {
+                return emitted;
+            }
+        }
+
         Color direct(0.0f);
         if (!srec.is_specular) {
             direct = srec.attenuation *
-                     estimate_direct_lighting(rec, scene, r, rng);
+                    estimate_direct_lighting(rec, scene, r, rng);
         }
 
         const bool next_count_emitted = srec.is_specular;
@@ -205,7 +213,7 @@ private:
             srec.attenuation *
             Li_internal(srec.scattered, scene, rng, depth + 1, next_count_emitted);
 
-        return emitted + direct + indirect;
+        return emitted + (direct + indirect) / rr_prob;
     }
 
     int max_depth_;
