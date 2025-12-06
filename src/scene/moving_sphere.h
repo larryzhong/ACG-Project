@@ -58,6 +58,11 @@ public:
         get_sphere_uv(outward_normal, rec.u, rec.v);
         rec.material = material_.get();
 
+        rec.tangent = normalize(Vec3(-outward_normal.z, 0.0f, outward_normal.x));
+        if (rec.tangent.length_squared() < 1e-6f) {
+            rec.tangent = Vec3(1.0f, 0.0f, 0.0f);
+        }
+
         return true;
     }
 
