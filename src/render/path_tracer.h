@@ -41,19 +41,28 @@ public:
             Vec3 light_normal;
             float pdf_area = 0.0f;
             const Material* light_material = nullptr;
+            bool is_point_light = (light.type == LightType::Point);
 
             if (const auto* sphere = dynamic_cast<const Sphere*>(shape)) {
                 const float radius = sphere->radius();
-                if (radius <= 0.0f) continue;
-
-                const Vec3 d = random_unit_vector(rng);
-                light_pos = sphere->center() + radius * d;
-                light_normal = d;
-
-                const float area = 4.0f * kPi * radius * radius;
-                pdf_area = area > 0.0f ? 1.0f / area : 0.0f;
                 light_material = sphere->material();
+
+                if (is_point_light) {
+                    light_pos = sphere->center();
+                    light_normal = Vec3(0.0f, 1.0f, 0.0f);
+                } else {
+                    if (radius <= 0.0f) continue;
+
+                    const Vec3 d = random_unit_vector(rng);
+                    light_pos = sphere->center() + radius * d;
+                    light_normal = d;
+
+                    const float area = 4.0f * kPi * radius * radius;
+                    pdf_area = area > 0.0f ? 1.0f / area : 0.0f;
+                }
             } else if (const auto* quad = dynamic_cast<const Quad*>(shape)) {
+                if (is_point_light) continue;
+
                 const float su = rng.uniform();
                 const float sv = rng.uniform();
 
@@ -67,7 +76,7 @@ public:
                 continue;
             }
 
-            if (!light_material || pdf_area <= 0.0f) {
+            if (!light_material || !is_point_light && pdf_area <= 0.0f) {
                 continue;
             }
 
@@ -79,10 +88,16 @@ public:
             const Vec3 wi = to_light / dist;
 
             const float cos_surface = dot(n, wi);
-            const float cos_light = dot(light_normal, -wi);
 
-            if (cos_surface <= 0.0f || cos_light <= 0.0f) {
+            if (cos_surface <= 0.0f) {
                 continue;
+            }
+
+            if (!is_point_light) {
+                const float cos_light = dot(light_normal, -wi);
+                if (cos_light <= 0.0f) {
+                    continue;
+                }
             }
 
             bool occluded = false;
@@ -133,8 +148,14 @@ public:
                 continue;
             }
 
-            const float geometry = (cos_surface * cos_light) / dist_squared;
-            const float weight = geometry / pdf_area;
+            float weight;
+            if (is_point_light) {
+                weight = cos_surface / dist_squared;
+            } else {
+                const float cos_light = dot(light_normal, -wi);
+                const float geometry = (cos_surface * cos_light) / dist_squared;
+                weight = geometry / pdf_area;
+            }
 
             result += emitted * weight;
         }
