@@ -1,6 +1,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <iomanip>
+#include <sstream>
 
 #include "camera/camera.h"
 #include "core/color.h"
@@ -24,6 +26,11 @@ int main(int argc, char** argv) {
     float shutter_close = 1.0f;
     std::string output = "basic_materials.ppm";
     std::string scene_name = "simple";
+    bool turntable_mode = false;
+    int turntable_frames = 60;
+    float turntable_radius = 0.0f;
+    float turntable_height = 0.0f;
+    Vec3 turntable_center(0.0f, 0.0f, 0.0f);
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -47,6 +54,19 @@ int main(int argc, char** argv) {
             shutter_open = static_cast<float>(std::atof(argv[++i]));
         } else if (arg == "--shutter-close" && i + 1 < argc) {
             shutter_close = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--turntable") {
+            turntable_mode = true;
+        } else if (arg == "--frames" && i + 1 < argc) {
+            turntable_frames = std::atoi(argv[++i]);
+        } else if (arg == "--turntable-radius" && i + 1 < argc) {
+            turntable_radius = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--turntable-height" && i + 1 < argc) {
+            turntable_height = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--turntable-center" && i + 3 < argc) {
+            float cx = static_cast<float>(std::atof(argv[++i]));
+            float cy = static_cast<float>(std::atof(argv[++i]));
+            float cz = static_cast<float>(std::atof(argv[++i]));
+            turntable_center = Vec3(cx, cy, cz);
         }
     }
 
@@ -112,18 +132,85 @@ int main(int argc, char** argv) {
         cam_settings.focus_dist = focus_dist;
     }
 
-    Camera camera(cam_settings);
-    PathTracer integrator(max_depth);
+    if (!turntable_mode) {
+        Camera camera(cam_settings);
+        PathTracer integrator(max_depth);
 
-    std::cout << "Rendering scene: " << scene_name << "\n";
-    render_image(scene, camera, integrator, film, samples_per_pixel);
+        std::cout << "Rendering scene: " << scene_name << "\n";
+        render_image(scene, camera, integrator, film, samples_per_pixel);
 
-    if (output.size() >= 4 && output.substr(output.size() - 4) == ".png") {
-        write_png(output, film);
-        std::cout << "Wrote PNG image to " << output << "\n";
+        if (output.size() >= 4 && output.substr(output.size() - 4) == ".png") {
+            write_png(output, film);
+            std::cout << "Wrote PNG image to " << output << "\n";
+        } else {
+            write_ppm(output, film);
+            std::cout << "Wrote PPM image to " << output << "\n";
+        }
     } else {
-        write_ppm(output, film);
-        std::cout << "Wrote PPM image to " << output << "\n";
+        PathTracer integrator(max_depth);
+
+        if (turntable_radius <= 0.0f) {
+            Vec3 diff = cam_settings.look_from - cam_settings.look_at;
+            turntable_radius = std::sqrt(diff.x * diff.x + diff.z * diff.z);
+        }
+        if (turntable_height == 0.0f) {
+            turntable_height = cam_settings.look_from.y;
+        }
+        if (turntable_center.length_squared() == 0.0f) {
+            turntable_center = cam_settings.look_at;
+        }
+
+        std::cout << "Turntable mode: " << turntable_frames << " frames\n";
+        std::cout << "  Center: (" << turntable_center.x << ", " 
+                  << turntable_center.y << ", " << turntable_center.z << ")\n";
+        std::cout << "  Radius: " << turntable_radius << ", Height: " << turntable_height << "\n";
+
+        std::string base_name = output;
+        std::string extension = ".png";
+        if (output.size() >= 4) {
+            std::string ext = output.substr(output.size() - 4);
+            if (ext == ".png" || ext == ".ppm") {
+                extension = ext;
+                base_name = output.substr(0, output.size() - 4);
+            }
+        }
+
+        const float angle_step = 2.0f * kPi / static_cast<float>(turntable_frames);
+
+        for (int frame = 0; frame < turntable_frames; ++frame) {
+            float angle = frame * angle_step;
+
+            float x = turntable_center.x + turntable_radius * std::sin(angle);
+            float z = turntable_center.z + turntable_radius * std::cos(angle);
+
+            cam_settings.look_from = Vec3(x, turntable_height, z);
+            cam_settings.look_at = turntable_center;
+
+            Vec3 diff = cam_settings.look_from - cam_settings.look_at;
+            cam_settings.focus_dist = diff.length();
+
+            Camera camera(cam_settings);
+
+            Film frame_film(width, height);
+
+            std::cout << "\rRendering frame " << (frame + 1) << "/" << turntable_frames 
+                      << " (angle: " << static_cast<int>(angle * 180.0f / kPi) << " deg)" << std::flush;
+
+            render_image(scene, camera, integrator, frame_film, samples_per_pixel);
+
+            std::ostringstream filename;
+            filename << base_name << "_" << std::setfill('0') << std::setw(4) << frame << extension;
+
+            if (extension == ".png") {
+                write_png(filename.str(), frame_film);
+            } else {
+                write_ppm(filename.str(), frame_film);
+            }
+        }
+
+        std::cout << "\nTurntable rendering complete!\n";
+        std::cout << "To create GIF, run:\n";
+        std::cout << "  ffmpeg -framerate 30 -i " << base_name << "_%04d.png -vf \"fps=30,scale=480:-1:flags=lanczos\" " << base_name << ".gif\n";
     }
 
     return 0;
