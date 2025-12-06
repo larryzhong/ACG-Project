@@ -56,32 +56,66 @@ int main(int argc, char** argv) {
     }
 
     Film film(width, height);
-
     Scene scene;
+    
+    CameraSettings cam_settings;
+    cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
+    cam_settings.vertical_fov_deg = 40.0f;
+    
     if (scene_name == "simple") {
         scene = build_simple_scene_basic();
+        cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
+        cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
+    } 
+    else if (scene_name == "dof") {
+        scene = build_dof_scene();
+        cam_settings.look_from = Vec3(0.0f, 2.0f, 2.5f);
+        cam_settings.look_at = Vec3(0.0f, 0.5f, -2.0f); 
+        cam_settings.vertical_fov_deg = 35.0f;
+    }
+    else if (scene_name == "motion") {
+        scene = build_motion_blur_scene();
+        cam_settings.look_from = Vec3(0.0f, 2.0f, 8.0f);
+        cam_settings.look_at = Vec3(0.0f, 1.5f, 0.0f);
+        cam_settings.vertical_fov_deg = 30.0f;
+    }
+    else if (scene_name == "texture") {
+        scene = build_texture_scene();
+        cam_settings.look_from = Vec3(0.0f, 3.0f, 8.0f);
+        cam_settings.look_at = Vec3(0.0f, 2.0f, 0.0f);
+        cam_settings.vertical_fov_deg = 35.0f;
+    }
+    else if (scene_name == "random") {
+        scene = build_random_scene();
+        cam_settings.look_from = Vec3(13.0f, 2.0f, 3.0f);
+        cam_settings.look_at = Vec3(0.0f, 0.0f, 0.0f);
+        cam_settings.vertical_fov_deg = 20.0f;
+        if (aperture == 0.0f) aperture = 0.1f;
+        if (focus_dist < 0.0f) focus_dist = 10.0f;
+    }
+    else {
+        std::cerr << "Unknown scene name: " << scene_name << "\n";
+        return 1;
     }
 
     scene.build_bvh();
 
-    CameraSettings cam_settings;
-    cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
-    cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
-    cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
     cam_settings.up = Vec3(0.0f, 1.0f, 0.0f);
-    cam_settings.vertical_fov_deg = 40.0f;
     cam_settings.aperture = aperture;
-    if (focus_dist <= 0.0f) {
-        const Vec3 diff = cam_settings.look_from - cam_settings.look_at;
-        focus_dist = diff.length();
-    }
-    cam_settings.focus_dist = focus_dist;
     cam_settings.t0 = shutter_open;
     cam_settings.t1 = shutter_close;
+
+    if (focus_dist <= 0.0f) {
+        const Vec3 diff = cam_settings.look_from - cam_settings.look_at;
+        cam_settings.focus_dist = diff.length();
+    } else {
+        cam_settings.focus_dist = focus_dist;
+    }
 
     Camera camera(cam_settings);
     PathTracer integrator(max_depth);
 
+    std::cout << "Rendering scene: " << scene_name << "\n";
     render_image(scene, camera, integrator, film, samples_per_pixel);
 
     if (output.size() >= 4 && output.substr(output.size() - 4) == ".png") {
