@@ -177,9 +177,9 @@ inline Scene build_motion_blur_scene() {
     auto orange = std::make_shared<Lambertian>(std::make_shared<SolidColor>(Color(0.8f, 0.3f, 0.1f)));
     auto white  = std::make_shared<Lambertian>(std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f)));
 
-    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0, -1000, 0), 1000, white));
+    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, white));
 
-    scene.objects.push_back(std::make_shared<Sphere>(Vec3(-2.0, 1, 0), 1.0, orange));
+    scene.objects.push_back(std::make_shared<Sphere>(Vec3(-2.0f, 1.0f, 0.0f), 1.0f, orange));
 
     auto moving_mat = std::make_shared<Lambertian>(std::make_shared<SolidColor>(Color(0.2f, 0.4f, 0.8f)));
     Vec3 center0(2.0f, 1.0f, 0.0f);
@@ -207,19 +207,19 @@ inline Scene build_texture_scene() {
     );
     auto ground_mat = std::make_shared<Lambertian>(checker);
 
-    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0, -1000, 0), 1000, ground_mat));
+    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, ground_mat));
 
     auto metal = std::make_shared<Metal>(std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f)), 0.1f);
-    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0, 2, 0), 2, metal));
+    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0.0f, 2.0f, 0.0f), 2.0f, metal));
 
     auto light_mat = std::make_shared<DiffuseLight>(std::make_shared<SolidColor>(Color(15, 15, 15)));
     
-    auto l1 = std::make_shared<Sphere>(Vec3(-3, 5, 3), 1.0f, light_mat);
+    auto l1 = std::make_shared<Sphere>(Vec3(-3.0f, 5.0f, 3.0f), 1.0f, light_mat);
     scene.objects.push_back(l1);
     scene.lights.add_area_light(l1);
     
     auto blue_light = std::make_shared<DiffuseLight>(std::make_shared<SolidColor>(Color(5, 5, 20)));
-    auto l2 = std::make_shared<Sphere>(Vec3(3, 4, 1), 0.8f, blue_light);
+    auto l2 = std::make_shared<Sphere>(Vec3(3.0f, 4.0f, 1.0f), 0.8f, blue_light);
     scene.objects.push_back(l2);
     scene.lights.add_area_light(l2);
 
@@ -239,7 +239,7 @@ inline Scene build_random_scene() {
         std::make_shared<SolidColor>(Color(0.9f, 0.9f, 0.9f)), 
         2.0f
     );
-    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0, -1000, 0), 1000, std::make_shared<Lambertian>(checker)));
+    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, std::make_shared<Lambertian>(checker)));
 
     // Random small spheres
     for (int a = -11; a < 11; a++) {
@@ -281,7 +281,7 @@ inline Scene build_random_scene() {
 
     // Sun light (Area light to simulate sun)
     auto light_mat = std::make_shared<DiffuseLight>(std::make_shared<SolidColor>(Color(10, 10, 10)));
-    auto light = std::make_shared<Sphere>(Vec3(0, 8, 0), 1.0f, light_mat);
+    auto light = std::make_shared<Sphere>(Vec3(0.0f, 8.0f, 0.0f), 1.0f, light_mat);
     scene.objects.push_back(light);
     scene.lights.add_area_light(light);
 
