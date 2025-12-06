@@ -28,7 +28,7 @@ public:
         }
 
         const Vec3 p = rec.point;
-        const Vec3 n = rec.normal;
+        const Vec3 n = rec.material ? rec.material->get_shading_normal(rec) : rec.normal;
 
         for (const auto& light : lights) {
             if (!light.shape) {

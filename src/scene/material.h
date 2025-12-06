@@ -33,6 +33,10 @@ public:
     virtual float opacity(const HitRecord& /*hit*/) const {
         return 1.0f;
     }
+
+    virtual Vec3 get_shading_normal(const HitRecord& hit) const {
+        return hit.normal;
+    }
 };
 
 using MaterialPtr = std::shared_ptr<Material>;
@@ -165,19 +169,26 @@ private:
 
 class NormalMappedLambertian : public Material {
 public:
-    NormalMappedLambertian(const TexturePtr& albedo, const NormalMapPtr& normal_map)
-        : albedo_(albedo), normal_map_(normal_map) {}
+    NormalMappedLambertian(const TexturePtr& albedo, const NormalMapPtr& normal_map, float strength = 1.0f)
+        : albedo_(albedo), normal_map_(normal_map), strength_(strength) {}
 
-    bool scatter(const Ray& r_in,
-                 const HitRecord& hit,
-                 ScatterRecord& srec,
-                 RNG& rng) const override {
-        Vec3 shading_normal = hit.normal;
+    Vec3 get_shading_normal(const HitRecord& hit) const override {
         if (normal_map_ && normal_map_->valid()) {
             Vec3 tangent_normal = normal_map_->get_normal(hit.u, hit.v);
-            shading_normal = NormalMapTexture::apply_normal_map(
+            tangent_normal.x *= strength_;
+            tangent_normal.y *= strength_;
+            tangent_normal = normalize(tangent_normal);
+            return NormalMapTexture::apply_normal_map(
                 tangent_normal, hit.normal, hit.tangent);
         }
+        return hit.normal;
+    }
+
+    bool scatter(const Ray& r_in,
+                const HitRecord& hit,
+                ScatterRecord& srec,
+                RNG& rng) const override {
+        Vec3 shading_normal = get_shading_normal(hit);
 
         ONB uvw;
         uvw.build_from_w(shading_normal);
@@ -200,4 +211,5 @@ public:
 private:
     TexturePtr albedo_;
     NormalMapPtr normal_map_;
+    float strength_;
 };
