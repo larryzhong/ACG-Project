@@ -162,3 +162,42 @@ private:
 
     float ir_;
 };
+
+class NormalMappedLambertian : public Material {
+public:
+    NormalMappedLambertian(const TexturePtr& albedo, const NormalMapPtr& normal_map)
+        : albedo_(albedo), normal_map_(normal_map) {}
+
+    bool scatter(const Ray& r_in,
+                 const HitRecord& hit,
+                 ScatterRecord& srec,
+                 RNG& rng) const override {
+        Vec3 shading_normal = hit.normal;
+        if (normal_map_ && normal_map_->valid()) {
+            Vec3 tangent_normal = normal_map_->get_normal(hit.u, hit.v);
+            shading_normal = NormalMapTexture::apply_normal_map(
+                tangent_normal, hit.normal, hit.tangent);
+        }
+
+        ONB uvw;
+        uvw.build_from_w(shading_normal);
+        Vec3 scatter_direction = uvw.local(random_cosine_direction(rng));
+
+        srec.scattered = Ray(hit.point, scatter_direction, r_in.time);
+        srec.attenuation =
+            albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+        srec.is_specular = false;
+        return true;
+    }
+
+    float opacity(const HitRecord& hit) const override {
+        if (!albedo_) {
+            return 1.0f;
+        }
+        return albedo_->alpha(hit.u, hit.v, hit.point);
+    }
+
+private:
+    TexturePtr albedo_;
+    NormalMapPtr normal_map_;
+};

@@ -105,6 +105,8 @@ public:
         rec.material = material_.get();
         rec.set_face_normal(r, normal_);
 
+        rec.tangent = normalize(u_);
+
         return true;
     }
 

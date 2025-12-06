@@ -198,3 +198,76 @@ private:
     int height_;
     int channels_;
 };
+
+class NormalMapTexture {
+public:
+    NormalMapTexture() : data_(nullptr), width_(0), height_(0), channels_(0) {}
+
+    explicit NormalMapTexture(const std::string& filename) {
+        data_ = stbi_load(filename.c_str(), &width_, &height_, &channels_, 3);
+        if (!data_) {
+            std::cerr << "ERROR: Could not load normal map: " << filename << "\n";
+            width_ = height_ = 0;
+        }
+    }
+
+    ~NormalMapTexture() {
+        if (data_) {
+            stbi_image_free(data_);
+        }
+    }
+
+    NormalMapTexture(const NormalMapTexture&) = delete;
+    NormalMapTexture& operator=(const NormalMapTexture&) = delete;
+
+    NormalMapTexture(NormalMapTexture&& other) noexcept
+        : data_(other.data_), width_(other.width_),
+          height_(other.height_), channels_(other.channels_) {
+        other.data_ = nullptr;
+        other.width_ = other.height_ = other.channels_ = 0;
+    }
+
+    Vec3 get_normal(float u, float v) const {
+        if (!data_) {
+            return Vec3(0.0f, 0.0f, 1.0f);
+        }
+
+        u = clamp_float(u, 0.0f, 1.0f);
+        v = 1.0f - clamp_float(v, 0.0f, 1.0f);
+
+        int x = static_cast<int>(u * (width_ - 1));
+        int y = static_cast<int>(v * (height_ - 1));
+
+        const std::size_t idx = (static_cast<std::size_t>(y) * width_ + x) * 3;
+
+        float nx = data_[idx + 0] / 255.0f * 2.0f - 1.0f;
+        float ny = data_[idx + 1] / 255.0f * 2.0f - 1.0f;
+        float nz = data_[idx + 2] / 255.0f * 2.0f - 1.0f;
+
+        return normalize(Vec3(nx, ny, nz));
+    }
+
+    static Vec3 apply_normal_map(const Vec3& tangent_normal,
+                                  const Vec3& normal,
+                                  const Vec3& tangent) {
+        Vec3 N = normalize(normal);
+        Vec3 T = normalize(tangent - dot(tangent, N) * N);
+        Vec3 B = cross(N, T);
+
+        return normalize(
+            tangent_normal.x * T +
+            tangent_normal.y * B +
+            tangent_normal.z * N
+        );
+    }
+
+    bool valid() const { return data_ != nullptr; }
+
+private:
+    unsigned char* data_;
+    int width_;
+    int height_;
+    int channels_;
+};
+
+using NormalMapPtr = std::shared_ptr<NormalMapTexture>;
