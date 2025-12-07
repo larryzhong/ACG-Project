@@ -296,23 +296,23 @@ inline Scene build_solar_system_scene() {
     scene.objects.push_back(key_light);
     scene.lights.add_area_light(key_light);
 
-    auto sun_tex = std::make_shared<ImageTexture>("../src/textures/2k_sun.jpg");
+    auto sun_tex = std::make_shared<ImageTexture>("../assets/textures/2k_sun.jpg");
     auto sun_visual_mat = std::make_shared<DiffuseLight>(sun_tex);
     scene.objects.push_back(std::make_shared<Sphere>(Vec3(-8.0f, 5.0f, -15.0f), 2.0f, sun_visual_mat));
 
     auto fill_light_mat = std::make_shared<DiffuseLight>(std::make_shared<SolidColor>(Color(0.05f, 0.05f, 0.1f)));
     scene.objects.push_back(std::make_shared<Quad>(Vec3(-50, -50, 50), Vec3(100, 0, 0), Vec3(0, 100, 0), fill_light_mat));
 
-    auto earth_tex = std::make_shared<ImageTexture>("../src/textures/2k_earth_daymap.jpg");
-    auto earth_normal = std::make_shared<NormalMapTexture>("../src/textures/2k_earth_normal.png");
+    auto earth_tex = std::make_shared<ImageTexture>("../assets/textures/2k_earth_daymap.jpg");
+    auto earth_normal = std::make_shared<NormalMapTexture>("../assets/textures/2k_earth_normal.png");
     auto earth_mat = std::make_shared<NormalMappedLambertian>(earth_tex, earth_normal, 10.0f);
     scene.objects.push_back(std::make_shared<Sphere>(Vec3(0.0f, 0.0f, 0.0f), 1.0f, earth_mat));
 
-    auto jupiter_tex = std::make_shared<ImageTexture>("../src/textures/2k_jupiter.jpg");
+    auto jupiter_tex = std::make_shared<ImageTexture>("../assets/textures/2k_jupiter.jpg");
     auto jupiter_mat = std::make_shared<Lambertian>(jupiter_tex);
     scene.objects.push_back(std::make_shared<Sphere>(Vec3(15.0f, 2.0f, -25.0f), 9.0f, jupiter_mat));
 
-    auto moon_tex = std::make_shared<ImageTexture>("../src/textures/2k_moon.jpg");
+    auto moon_tex = std::make_shared<ImageTexture>("../assets/textures/2k_moon.jpg");
     auto moon_mat = std::make_shared<Lambertian>(moon_tex);
     scene.objects.push_back(std::make_shared<Sphere>(Vec3(-2.2f, -0.8f, 3.5f), 0.28f, moon_mat));
 
