@@ -328,3 +328,35 @@ inline Scene build_solar_system_scene() {
 
     return scene;
 }
+
+inline Scene build_alpha_shadow_scene() {
+    Scene scene;
+
+    // Ground
+    auto ground_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f)));
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(-5, 0, -5), Vec3(10, 0, 0), Vec3(0, 0, 10), ground_mat));
+
+    // Semi-transparent checker sphere using AlphaCheckerTexture
+    auto alpha_checker = std::make_shared<AlphaCheckerTexture>(8.0f);
+    auto alpha_mat = std::make_shared<Lambertian>(alpha_checker);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.0f, 1.0f, 0.0f), 1.0f, alpha_mat));
+
+    // Solid sphere behind to show shadow
+    auto red_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.8f, 0.2f, 0.2f)));
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(2.0f, 0.5f, 1.0f), 0.5f, red_mat));
+
+    // Area light from above-left
+    auto light_mat = std::make_shared<DiffuseLight>(
+        std::make_shared<SolidColor>(Color(15, 15, 15)));
+    auto light = std::make_shared<Quad>(
+        Vec3(-2, 5, -2), Vec3(2, 0, 0), Vec3(0, 0, 2), light_mat);
+    scene.objects.push_back(light);
+    scene.lights.add_area_light(light);
+
+    return scene;
+}

@@ -115,14 +115,22 @@ int main(int argc, char** argv) {
         cam_settings.vertical_fov_deg = 20.0f;
         if (aperture == 0.0f) aperture = 0.1f;
         if (focus_dist < 0.0f) focus_dist = 10.0f;
-    } else if (scene_name == "solar") {
+    }
+    else if (scene_name == "solar") {
         scene = build_solar_system_scene();
         cam_settings.look_from = Vec3(0.0f, 0.0f, 8.5f);
         cam_settings.look_at = Vec3(0.0f, 0.0f, 0.0f);
         cam_settings.vertical_fov_deg = 35.0f;
         cam_settings.aperture = 0.05f;
         cam_settings.focus_dist = 8.5f;
-    } else {
+    }
+    else if (scene_name == "alpha") {
+        scene = build_alpha_shadow_scene();
+        cam_settings.look_from = Vec3(0.0f, 3.0f, 6.0f);
+        cam_settings.look_at = Vec3(0.0f, 1.0f, 0.0f);
+        cam_settings.vertical_fov_deg = 40.0f;
+    }
+    else {
         std::cerr << "Unknown scene name: " << scene_name << "\n";
         return 1;
     }
