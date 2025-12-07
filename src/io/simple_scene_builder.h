@@ -296,9 +296,9 @@ inline Scene build_solar_system_scene() {
     scene.objects.push_back(key_light);
     scene.lights.add_area_light(key_light);
 
-    auto sun_tex = std::make_shared<ImageTexture>("../assets/textures/2k_sun.jpg");
-    auto sun_visual_mat = std::make_shared<DiffuseLight>(sun_tex);
-    scene.objects.push_back(std::make_shared<Sphere>(Vec3(-8.0f, 5.0f, -15.0f), 2.0f, sun_visual_mat));
+    // auto sun_tex = std::make_shared<ImageTexture>("../assets/textures/2k_sun.jpg");
+    // auto sun_visual_mat = std::make_shared<DiffuseLight>(sun_tex);
+    // scene.objects.push_back(std::make_shared<Sphere>(Vec3(-8.0f, 5.0f, -15.0f), 2.0f, sun_visual_mat));
 
     auto fill_light_mat = std::make_shared<DiffuseLight>(std::make_shared<SolidColor>(Color(0.05f, 0.05f, 0.1f)));
     scene.objects.push_back(std::make_shared<Quad>(Vec3(-50, -50, 50), Vec3(100, 0, 0), Vec3(0, 100, 0), fill_light_mat));
