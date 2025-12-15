@@ -4,6 +4,7 @@
 
 #include "core/color.h"
 #include "scene/material.h"
+#include "scene/mesh.h"
 #include "scene/moving_sphere.h"
 #include "scene/quad.h"
 #include "scene/scene.h"
@@ -357,6 +358,107 @@ inline Scene build_alpha_shadow_scene() {
         Vec3(-2, 5, -2), Vec3(2, 0, 0), Vec3(0, 0, 2), light_mat);
     scene.objects.push_back(light);
     scene.lights.add_area_light(light);
+
+    return scene;
+}
+
+inline Scene build_mesh_scene() {
+    Scene scene;
+
+    auto ground_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.75f, 0.75f, 0.75f)));
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(-6.0f, 0.0f, -6.0f), Vec3(12.0f, 0.0f, 0.0f), Vec3(0.0f, 0.0f, 12.0f), ground_mat));
+
+    auto light_mat = std::make_shared<DiffuseLight>(
+        std::make_shared<SolidColor>(Color(20.0f, 20.0f, 20.0f)));
+    auto light = std::make_shared<Quad>(
+        Vec3(-1.2f, 3.5f, -2.2f), Vec3(2.4f, 0.0f, 0.0f), Vec3(0.0f, 0.0f, 2.4f), light_mat);
+    scene.objects.push_back(light);
+    scene.lights.add_area_light(light);
+
+    const float x = 0.5f;
+    const float y = 0.5f;
+    const float z = 0.5f;
+
+    std::vector<Vec3> positions = {
+        // +Z (front)
+        Vec3(-x, -y, z), Vec3(x, -y, z), Vec3(x, y, z), Vec3(-x, y, z),
+        // -Z (back)
+        Vec3(-x, -y, -z), Vec3(-x, y, -z), Vec3(x, y, -z), Vec3(x, -y, -z),
+        // +X (right)
+        Vec3(x, -y, -z), Vec3(x, y, -z), Vec3(x, y, z), Vec3(x, -y, z),
+        // -X (left)
+        Vec3(-x, -y, z), Vec3(-x, y, z), Vec3(-x, y, -z), Vec3(-x, -y, -z),
+        // +Y (top)
+        Vec3(-x, y, z), Vec3(x, y, z), Vec3(x, y, -z), Vec3(-x, y, -z),
+        // -Y (bottom)
+        Vec3(-x, -y, -z), Vec3(x, -y, -z), Vec3(x, -y, z), Vec3(-x, -y, z),
+    };
+
+    std::vector<Vec3> normals = {
+        // +Z
+        Vec3(0.0f, 0.0f, 1.0f), Vec3(0.0f, 0.0f, 1.0f), Vec3(0.0f, 0.0f, 1.0f), Vec3(0.0f, 0.0f, 1.0f),
+        // -Z
+        Vec3(0.0f, 0.0f, -1.0f), Vec3(0.0f, 0.0f, -1.0f), Vec3(0.0f, 0.0f, -1.0f), Vec3(0.0f, 0.0f, -1.0f),
+        // +X
+        Vec3(1.0f, 0.0f, 0.0f), Vec3(1.0f, 0.0f, 0.0f), Vec3(1.0f, 0.0f, 0.0f), Vec3(1.0f, 0.0f, 0.0f),
+        // -X
+        Vec3(-1.0f, 0.0f, 0.0f), Vec3(-1.0f, 0.0f, 0.0f), Vec3(-1.0f, 0.0f, 0.0f), Vec3(-1.0f, 0.0f, 0.0f),
+        // +Y
+        Vec3(0.0f, 1.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f),
+        // -Y
+        Vec3(0.0f, -1.0f, 0.0f), Vec3(0.0f, -1.0f, 0.0f), Vec3(0.0f, -1.0f, 0.0f), Vec3(0.0f, -1.0f, 0.0f),
+    };
+
+    std::vector<Vec2> uvs = {
+        // +Z
+        Vec2(0.0f, 0.0f), Vec2(1.0f, 0.0f), Vec2(1.0f, 1.0f), Vec2(0.0f, 1.0f),
+        // -Z
+        Vec2(0.0f, 0.0f), Vec2(0.0f, 1.0f), Vec2(1.0f, 1.0f), Vec2(1.0f, 0.0f),
+        // +X
+        Vec2(0.0f, 0.0f), Vec2(0.0f, 1.0f), Vec2(1.0f, 1.0f), Vec2(1.0f, 0.0f),
+        // -X
+        Vec2(0.0f, 0.0f), Vec2(0.0f, 1.0f), Vec2(1.0f, 1.0f), Vec2(1.0f, 0.0f),
+        // +Y
+        Vec2(0.0f, 0.0f), Vec2(1.0f, 0.0f), Vec2(1.0f, 1.0f), Vec2(0.0f, 1.0f),
+        // -Y
+        Vec2(0.0f, 0.0f), Vec2(1.0f, 0.0f), Vec2(1.0f, 1.0f), Vec2(0.0f, 1.0f),
+    };
+
+    std::vector<std::uint32_t> indices;
+    indices.reserve(6 * 6);
+    for (std::uint32_t face = 0; face < 6; ++face) {
+        const std::uint32_t base = face * 4;
+        indices.push_back(base + 0);
+        indices.push_back(base + 1);
+        indices.push_back(base + 2);
+        indices.push_back(base + 0);
+        indices.push_back(base + 2);
+        indices.push_back(base + 3);
+    }
+
+    MeshDataPtr cube_data =
+        std::make_shared<MeshData>(std::move(positions), std::move(normals), std::move(uvs), std::move(indices));
+
+    auto cube_tex = std::make_shared<ImageTexture>("../assets/textures/2k_earth_daymap.jpg");
+    auto cube_normal = std::make_shared<NormalMapTexture>("../assets/textures/2k_earth_normal.png");
+    auto cube_mat = std::make_shared<NormalMappedLambertian>(cube_tex, cube_normal, 2.0f);
+
+    Transform t1 =
+        Transform::translate(Vec3(-0.9f, 0.7f, -1.2f)) *
+        Transform::rotate_y(0.6f) *
+        Transform::uniform_scale(0.8f);
+    Transform t2 =
+        Transform::translate(Vec3(0.9f, 0.6f, -0.6f)) *
+        Transform::rotate_y(-0.4f) *
+        Transform::uniform_scale(0.65f);
+
+    scene.objects.push_back(std::make_shared<Mesh>(cube_data, t1, cube_mat));
+    scene.objects.push_back(std::make_shared<Mesh>(cube_data, t2, cube_mat));
+
+    auto glass = std::make_shared<Dielectric>(1.5f);
+    scene.objects.push_back(std::make_shared<Sphere>(Vec3(0.0f, 0.5f, 0.8f), 0.5f, glass));
 
     return scene;
 }

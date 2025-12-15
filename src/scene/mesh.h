@@ -1,4 +1,532 @@
 #pragma once
 
-// Placeholder for mesh geometry definition. Implementation pending.
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <vector>
 
+#include "core/ray.h"
+#include "core/vec2.h"
+#include "core/vec3.h"
+#include "math/aabb.h"
+#include "math/transform.h"
+#include "scene/hittable.h"
+#include "scene/material.h"
+
+class MeshData {
+public:
+    MeshData(std::vector<Vec3> positions,
+             std::vector<Vec3> normals,
+             std::vector<Vec2> uvs,
+             std::vector<std::uint32_t> indices)
+        : positions_(std::move(positions)),
+          normals_(std::move(normals)),
+          uvs_(std::move(uvs)),
+          indices_(std::move(indices)) {
+        build_internal();
+    }
+
+    std::size_t triangle_count() const {
+        return indices_.size() / 3;
+    }
+
+    const AABB& bounding_box() const {
+        return bounds_;
+    }
+
+    bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const {
+        if (nodes_.empty() || prim_indices_.empty()) {
+            return false;
+        }
+
+        bool hit_anything = false;
+        float closest_so_far = t_max;
+
+        std::uint32_t best_tri = 0;
+        float best_b1 = 0.0f;
+        float best_b2 = 0.0f;
+
+        std::vector<int> stack;
+        stack.reserve(64);
+        stack.push_back(root_);
+
+        while (!stack.empty()) {
+            const int node_index = stack.back();
+            stack.pop_back();
+            const Node& node = nodes_[node_index];
+
+            if (!node.box.hit(r, t_min, closest_so_far)) {
+                continue;
+            }
+
+            if (node.is_leaf) {
+                for (std::uint32_t i = 0; i < node.count; ++i) {
+                    const std::uint32_t tri = prim_indices_[node.start + i];
+                    float t = 0.0f;
+                    float b1 = 0.0f;
+                    float b2 = 0.0f;
+                    if (intersect_triangle(tri, r, t_min, closest_so_far, t, b1, b2)) {
+                        hit_anything = true;
+                        closest_so_far = t;
+                        best_tri = tri;
+                        best_b1 = b1;
+                        best_b2 = b2;
+                    }
+                }
+            } else {
+                stack.push_back(node.left);
+                stack.push_back(node.right);
+            }
+        }
+
+        if (!hit_anything) {
+            return false;
+        }
+
+        const std::size_t i0 = indices_[3 * static_cast<std::size_t>(best_tri) + 0];
+        const std::size_t i1 = indices_[3 * static_cast<std::size_t>(best_tri) + 1];
+        const std::size_t i2 = indices_[3 * static_cast<std::size_t>(best_tri) + 2];
+
+        const Vec3& p0 = positions_[i0];
+        const Vec3& p1 = positions_[i1];
+        const Vec3& p2 = positions_[i2];
+
+        const float w0 = 1.0f - best_b1 - best_b2;
+        const float w1 = best_b1;
+        const float w2 = best_b2;
+
+        rec.t = closest_so_far;
+        rec.point = r.at(rec.t);
+
+        Vec3 geom_normal = cross(p1 - p0, p2 - p0);
+        if (geom_normal.length_squared() > 1e-20f) {
+            geom_normal = normalize(geom_normal);
+        } else {
+            geom_normal = Vec3(0.0f, 1.0f, 0.0f);
+        }
+
+        Vec2 uv = uvs_[i0] * w0 + uvs_[i1] * w1 + uvs_[i2] * w2;
+        rec.u = uv.x;
+        rec.v = uv.y;
+
+        Vec3 shading_normal = normals_[i0] * w0 + normals_[i1] * w1 + normals_[i2] * w2;
+        if (shading_normal.length_squared() > 1e-20f) {
+            shading_normal = normalize(shading_normal);
+        } else {
+            shading_normal = geom_normal;
+        }
+
+        if (dot(shading_normal, geom_normal) < 0.0f) {
+            shading_normal = -shading_normal;
+        }
+
+        Vec3 tangent = tangents_[i0] * w0 + tangents_[i1] * w1 + tangents_[i2] * w2;
+        if (tangent.length_squared() > 1e-20f) {
+            tangent = normalize(tangent);
+        } else {
+            tangent = normalize(p1 - p0);
+        }
+
+        rec.front_face = dot(r.direction, geom_normal) < 0.0f;
+        rec.normal = rec.front_face ? shading_normal : -shading_normal;
+
+        Vec3 ortho_tangent = tangent - dot(tangent, rec.normal) * rec.normal;
+        if (ortho_tangent.length_squared() < 1e-16f) {
+            ortho_tangent = orthonormal_tangent(rec.normal);
+        } else {
+            ortho_tangent = normalize(ortho_tangent);
+        }
+        rec.tangent = rec.front_face ? ortho_tangent : -ortho_tangent;
+
+        rec.material = nullptr;
+
+        return true;
+    }
+
+private:
+    struct Node {
+        AABB box;
+        int left = -1;
+        int right = -1;
+        std::uint32_t start = 0;
+        std::uint32_t count = 0;
+        bool is_leaf = false;
+    };
+
+    static Vec3 orthonormal_tangent(const Vec3& n) {
+        Vec3 a = (std::fabs(n.x) < 0.9f) ? Vec3(1.0f, 0.0f, 0.0f) : Vec3(0.0f, 1.0f, 0.0f);
+        return normalize(cross(a, n));
+    }
+
+    void build_internal() {
+        if (indices_.size() % 3 != 0) {
+            indices_.resize(indices_.size() - (indices_.size() % 3));
+        }
+
+        if (positions_.empty() || indices_.empty()) {
+            bounds_ = AABB(Vec3::zero(), Vec3::zero());
+            return;
+        }
+
+        if (normals_.size() != positions_.size()) {
+            compute_vertex_normals();
+        }
+
+        if (uvs_.size() != positions_.size()) {
+            uvs_.assign(positions_.size(), Vec2::zero());
+        }
+
+        compute_vertex_tangents();
+        build_triangle_bounds();
+        build_bvh();
+    }
+
+    void compute_vertex_normals() {
+        normals_.assign(positions_.size(), Vec3::zero());
+
+        const std::size_t tri_count = triangle_count();
+        for (std::size_t tri = 0; tri < tri_count; ++tri) {
+            const std::size_t i0 = indices_[3 * tri + 0];
+            const std::size_t i1 = indices_[3 * tri + 1];
+            const std::size_t i2 = indices_[3 * tri + 2];
+
+            const Vec3& p0 = positions_[i0];
+            const Vec3& p1 = positions_[i1];
+            const Vec3& p2 = positions_[i2];
+
+            const Vec3 n = cross(p1 - p0, p2 - p0);
+            normals_[i0] += n;
+            normals_[i1] += n;
+            normals_[i2] += n;
+        }
+
+        for (auto& n : normals_) {
+            if (n.length_squared() > 1e-20f) {
+                n = normalize(n);
+            } else {
+                n = Vec3(0.0f, 1.0f, 0.0f);
+            }
+        }
+    }
+
+    void compute_vertex_tangents() {
+        tangents_.assign(positions_.size(), Vec3::zero());
+
+        const std::size_t tri_count = triangle_count();
+        for (std::size_t tri = 0; tri < tri_count; ++tri) {
+            const std::size_t i0 = indices_[3 * tri + 0];
+            const std::size_t i1 = indices_[3 * tri + 1];
+            const std::size_t i2 = indices_[3 * tri + 2];
+
+            const Vec3& p0 = positions_[i0];
+            const Vec3& p1 = positions_[i1];
+            const Vec3& p2 = positions_[i2];
+
+            const Vec2& uv0 = uvs_[i0];
+            const Vec2& uv1 = uvs_[i1];
+            const Vec2& uv2 = uvs_[i2];
+
+            const Vec3 dp1 = p1 - p0;
+            const Vec3 dp2 = p2 - p0;
+
+            const Vec2 duv1 = uv1 - uv0;
+            const Vec2 duv2 = uv2 - uv0;
+
+            const float denom = duv1.x * duv2.y - duv1.y * duv2.x;
+            Vec3 tangent;
+
+            if (std::fabs(denom) < 1e-12f) {
+                tangent = dp1;
+            } else {
+                const float r = 1.0f / denom;
+                tangent = (dp1 * duv2.y - dp2 * duv1.y) * r;
+            }
+
+            tangents_[i0] += tangent;
+            tangents_[i1] += tangent;
+            tangents_[i2] += tangent;
+        }
+
+        for (std::size_t i = 0; i < tangents_.size(); ++i) {
+            const Vec3 n = normals_[i];
+            Vec3 t = tangents_[i];
+
+            t = t - dot(t, n) * n;
+            if (t.length_squared() < 1e-16f) {
+                t = orthonormal_tangent(n);
+            } else {
+                t = normalize(t);
+            }
+
+            tangents_[i] = t;
+        }
+    }
+
+    void build_triangle_bounds() {
+        const std::size_t tri_count = triangle_count();
+        tri_boxes_.clear();
+        tri_centroids_.clear();
+        prim_indices_.clear();
+        nodes_.clear();
+
+        tri_boxes_.reserve(tri_count);
+        tri_centroids_.reserve(tri_count);
+        prim_indices_.reserve(tri_count);
+
+        bool first_box = true;
+
+        for (std::size_t tri = 0; tri < tri_count; ++tri) {
+            const std::size_t i0 = indices_[3 * tri + 0];
+            const std::size_t i1 = indices_[3 * tri + 1];
+            const std::size_t i2 = indices_[3 * tri + 2];
+
+            const Vec3& p0 = positions_[i0];
+            const Vec3& p1 = positions_[i1];
+            const Vec3& p2 = positions_[i2];
+
+            const float min_x = std::min({p0.x, p1.x, p2.x});
+            const float min_y = std::min({p0.y, p1.y, p2.y});
+            const float min_z = std::min({p0.z, p1.z, p2.z});
+
+            const float max_x = std::max({p0.x, p1.x, p2.x});
+            const float max_y = std::max({p0.y, p1.y, p2.y});
+            const float max_z = std::max({p0.z, p1.z, p2.z});
+
+            const float epsilon = 1e-5f;
+            AABB box(
+                Vec3(min_x - epsilon, min_y - epsilon, min_z - epsilon),
+                Vec3(max_x + epsilon, max_y + epsilon, max_z + epsilon));
+
+            tri_boxes_.push_back(box);
+            tri_centroids_.push_back((p0 + p1 + p2) / 3.0f);
+            prim_indices_.push_back(static_cast<std::uint32_t>(tri));
+
+            if (first_box) {
+                bounds_ = box;
+                first_box = false;
+            } else {
+                bounds_ = surrounding_box(bounds_, box);
+            }
+        }
+    }
+
+    static int choose_split_axis(const AABB& bounds) {
+        const float dx = bounds.max.x - bounds.min.x;
+        const float dy = bounds.max.y - bounds.min.y;
+        const float dz = bounds.max.z - bounds.min.z;
+
+        if (dx > dy && dx > dz) {
+            return 0;
+        } else if (dy > dz) {
+            return 1;
+        }
+        return 2;
+    }
+
+    void build_bvh() {
+        if (prim_indices_.empty()) {
+            root_ = -1;
+            return;
+        }
+
+        root_ = build_node(0, static_cast<std::uint32_t>(prim_indices_.size()));
+    }
+
+    int build_node(std::uint32_t start, std::uint32_t end) {
+        const std::uint32_t span = end - start;
+
+        AABB range_box;
+        bool first = true;
+        for (std::uint32_t i = start; i < end; ++i) {
+            const std::uint32_t tri = prim_indices_[i];
+            const AABB& b = tri_boxes_[tri];
+            if (first) {
+                range_box = b;
+                first = false;
+            } else {
+                range_box = surrounding_box(range_box, b);
+            }
+        }
+
+        Node node;
+        node.box = range_box;
+
+        const int node_index = static_cast<int>(nodes_.size());
+        nodes_.push_back(node);
+
+        const std::uint32_t leaf_size = 4;
+        if (span <= leaf_size) {
+            nodes_[node_index].start = start;
+            nodes_[node_index].count = span;
+            nodes_[node_index].is_leaf = true;
+            return node_index;
+        }
+
+        const int axis = choose_split_axis(range_box);
+        const std::uint32_t mid = start + span / 2;
+
+        auto centroid_less = [&](std::uint32_t a, std::uint32_t b) {
+            const Vec3& ca = tri_centroids_[a];
+            const Vec3& cb = tri_centroids_[b];
+            if (axis == 0) {
+                return ca.x < cb.x;
+            } else if (axis == 1) {
+                return ca.y < cb.y;
+            }
+            return ca.z < cb.z;
+        };
+
+        std::nth_element(
+            prim_indices_.begin() + static_cast<std::ptrdiff_t>(start),
+            prim_indices_.begin() + static_cast<std::ptrdiff_t>(mid),
+            prim_indices_.begin() + static_cast<std::ptrdiff_t>(end),
+            centroid_less);
+
+        const int left = build_node(start, mid);
+        const int right = build_node(mid, end);
+
+        nodes_[node_index].left = left;
+        nodes_[node_index].right = right;
+        nodes_[node_index].is_leaf = false;
+        nodes_[node_index].count = 0;
+        nodes_[node_index].box = surrounding_box(nodes_[left].box, nodes_[right].box);
+
+        return node_index;
+    }
+
+    bool intersect_triangle(std::uint32_t tri,
+                            const Ray& r,
+                            float t_min,
+                            float t_max,
+                            float& out_t,
+                            float& out_b1,
+                            float& out_b2) const {
+        const std::size_t i0 = indices_[3 * static_cast<std::size_t>(tri) + 0];
+        const std::size_t i1 = indices_[3 * static_cast<std::size_t>(tri) + 1];
+        const std::size_t i2 = indices_[3 * static_cast<std::size_t>(tri) + 2];
+
+        const Vec3& p0 = positions_[i0];
+        const Vec3& p1 = positions_[i1];
+        const Vec3& p2 = positions_[i2];
+
+        const Vec3 e1 = p1 - p0;
+        const Vec3 e2 = p2 - p0;
+
+        const Vec3 pvec = cross(r.direction, e2);
+        const float det = dot(e1, pvec);
+
+        if (std::fabs(det) < 1e-10f) {
+            return false;
+        }
+
+        const float inv_det = 1.0f / det;
+        const Vec3 tvec = r.origin - p0;
+        const float u = dot(tvec, pvec) * inv_det;
+        if (u < 0.0f || u > 1.0f) {
+            return false;
+        }
+
+        const Vec3 qvec = cross(tvec, e1);
+        const float v = dot(r.direction, qvec) * inv_det;
+        if (v < 0.0f || u + v > 1.0f) {
+            return false;
+        }
+
+        const float t = dot(e2, qvec) * inv_det;
+        if (t < t_min || t > t_max) {
+            return false;
+        }
+
+        out_t = t;
+        out_b1 = u;
+        out_b2 = v;
+        return true;
+    }
+
+    std::vector<Vec3> positions_;
+    std::vector<Vec3> normals_;
+    std::vector<Vec2> uvs_;
+    std::vector<std::uint32_t> indices_;
+    std::vector<Vec3> tangents_;
+
+    AABB bounds_;
+    std::vector<AABB> tri_boxes_;
+    std::vector<Vec3> tri_centroids_;
+    std::vector<std::uint32_t> prim_indices_;
+    std::vector<Node> nodes_;
+    int root_ = -1;
+};
+
+using MeshDataPtr = std::shared_ptr<const MeshData>;
+
+class Mesh : public Hittable {
+public:
+    Mesh() = default;
+
+    Mesh(const MeshDataPtr& data, const Transform& transform, const MaterialPtr& material)
+        : data_(data),
+          transform_(transform),
+          material_(material) {
+        if (data_) {
+            world_bounds_ = transform_aabb(data_->bounding_box(), transform_);
+        }
+    }
+
+    Mesh(const MeshDataPtr& data, const MaterialPtr& material)
+        : Mesh(data, Transform::identity(), material) {}
+
+    bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const override {
+        if (!data_) {
+            return false;
+        }
+
+        Ray local_ray = transform_.apply_inverse(r);
+        HitRecord local_rec;
+        if (!data_->hit(local_ray, t_min, t_max, local_rec)) {
+            return false;
+        }
+
+        rec = local_rec;
+        rec.point = transform_.apply_point(local_rec.point);
+
+        Vec3 world_normal = transform_.apply_normal(local_rec.normal);
+        if (world_normal.length_squared() > 1e-20f) {
+            world_normal = normalize(world_normal);
+        } else {
+            world_normal = local_rec.normal;
+        }
+        rec.normal = world_normal;
+
+        Vec3 world_tangent = transform_.apply_vector(local_rec.tangent);
+        if (world_tangent.length_squared() > 1e-20f) {
+            world_tangent = normalize(world_tangent);
+        } else {
+            world_tangent = local_rec.tangent;
+        }
+
+        world_tangent = world_tangent - dot(world_tangent, rec.normal) * rec.normal;
+        if (world_tangent.length_squared() < 1e-16f) {
+            world_tangent = normalize(cross(
+                (std::fabs(rec.normal.x) < 0.9f) ? Vec3(1.0f, 0.0f, 0.0f) : Vec3(0.0f, 1.0f, 0.0f),
+                rec.normal));
+        } else {
+            world_tangent = normalize(world_tangent);
+        }
+        rec.tangent = world_tangent;
+
+        rec.material = material_.get();
+
+        return true;
+    }
+
+    AABB bounding_box() const override {
+        return world_bounds_;
+    }
+
+private:
+    MeshDataPtr data_;
+    Transform transform_;
+    AABB world_bounds_;
+    MaterialPtr material_;
+};

@@ -130,6 +130,12 @@ int main(int argc, char** argv) {
         cam_settings.look_at = Vec3(0.0f, 1.0f, 0.0f);
         cam_settings.vertical_fov_deg = 40.0f;
     }
+    else if (scene_name == "mesh") {
+        scene = build_mesh_scene();
+        cam_settings.look_from = Vec3(0.0f, 1.6f, 3.5f);
+        cam_settings.look_at = Vec3(0.0f, 0.7f, -1.0f);
+        cam_settings.vertical_fov_deg = 35.0f;
+    }
     else {
         std::cerr << "Unknown scene name: " << scene_name << "\n";
         return 1;
