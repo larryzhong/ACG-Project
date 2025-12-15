@@ -108,6 +108,11 @@ public:
 
         rec.tangent = normalize(u_);
 
+        rec.dpdu = u_;
+        rec.dpdv = v_;
+        const float travel = (rec.point - r.origin).length();
+        rec.ray_footprint = r.cone.width + r.cone.spread_angle * travel;
+
         return true;
     }
 

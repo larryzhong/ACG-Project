@@ -19,6 +19,9 @@ struct HitRecord {
     const Material* material;
     const Hittable* object = nullptr;
     bool front_face;
+    Vec3 dpdu = Vec3(0.0f);
+    Vec3 dpdv = Vec3(0.0f);
+    float ray_footprint = 0.0f; // world-space radius at hit, for texture LOD
 
     void set_face_normal(const Ray& r, const Vec3& outward_normal) {
         front_face = dot(r.direction, outward_normal) < 0.0f;

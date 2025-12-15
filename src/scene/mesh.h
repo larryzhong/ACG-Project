@@ -141,6 +141,23 @@ public:
         }
         rec.tangent = rec.front_face ? ortho_tangent : -ortho_tangent;
 
+        const Vec2& uv0 = uvs_[i0];
+        const Vec2& uv1 = uvs_[i1];
+        const Vec2& uv2 = uvs_[i2];
+        const Vec3 e1 = p1 - p0;
+        const Vec3 e2 = p2 - p0;
+        const Vec2 duv1 = uv1 - uv0;
+        const Vec2 duv2 = uv2 - uv0;
+        const float det = duv1.x * duv2.y - duv1.y * duv2.x;
+        if (std::fabs(det) > 1e-10f) {
+            const float inv_det = 1.0f / det;
+            rec.dpdu = (e1 * duv2.y - e2 * duv1.y) * inv_det;
+            rec.dpdv = (e2 * duv1.x - e1 * duv2.x) * inv_det;
+        } else {
+            rec.dpdu = rec.tangent;
+            rec.dpdv = cross(rec.normal, rec.dpdu);
+        }
+
         rec.material = nullptr;
         rec.object = nullptr;
 
@@ -528,6 +545,10 @@ public:
 
         rec = local_rec;
         rec.point = transform_.apply_point(local_rec.point);
+        const float dir_denom = dot(r.direction, r.direction);
+        if (dir_denom > 1e-20f) {
+            rec.t = dot(rec.point - r.origin, r.direction) / dir_denom;
+        }
 
         Vec3 world_normal = transform_.apply_normal(local_rec.normal);
         if (world_normal.length_squared() > 1e-20f) {
@@ -553,6 +574,12 @@ public:
             world_tangent = normalize(world_tangent);
         }
         rec.tangent = world_tangent;
+
+        rec.dpdu = transform_.apply_vector(local_rec.dpdu);
+        rec.dpdv = transform_.apply_vector(local_rec.dpdv);
+
+        const float travel = (rec.point - r.origin).length();
+        rec.ray_footprint = r.cone.width + r.cone.spread_angle * travel;
 
         rec.material = material_.get();
         rec.object = this;

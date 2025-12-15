@@ -64,6 +64,22 @@ public:
             rec.tangent = Vec3(1.0f, 0.0f, 0.0f);
         }
 
+        const float travel = (rec.point - r.origin).length();
+        rec.ray_footprint = r.cone.width + r.cone.spread_angle * travel;
+
+        const float y = clamp_float(outward_normal.y, -1.0f, 1.0f);
+        const float theta = std::acos(-y);
+        const float phi = std::atan2(-outward_normal.z, outward_normal.x) + kPi;
+        const float sin_theta = std::sin(theta);
+
+        const Vec3 dpdphi(-std::sin(phi) * sin_theta, 0.0f, -std::cos(phi) * sin_theta);
+        const Vec3 dpdtheta(std::cos(phi) * std::cos(theta),
+                            std::sin(theta),
+                            -std::sin(phi) * std::cos(theta));
+
+        rec.dpdu = dpdphi * (2.0f * kPi * radius_);
+        rec.dpdv = dpdtheta * (kPi * radius_);
+
         return true;
     }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 
 #include "camera/camera.h"
@@ -18,6 +19,27 @@
 class PathTracer : public Integrator {
 public:
     explicit PathTracer(int max_depth) : max_depth_(max_depth) {}
+
+    static RayCone advance_cone(const RayCone& cone, float distance) {
+        RayCone out = cone;
+        out.width = cone.width + cone.spread_angle * std::max(0.0f, distance);
+        return out;
+    }
+
+    static RayCone scatter_cone(const RayCone& cone,
+                                float distance,
+                                float roughness,
+                                bool is_delta) {
+        RayCone out = advance_cone(cone, distance);
+        roughness = clamp_float(roughness, 0.0f, 1.0f);
+
+        const float min_spread =
+            is_delta ? (0.02f + 0.15f * roughness)
+                     : (0.15f + 0.35f * roughness);
+
+        out.spread_angle = std::max(out.spread_angle, min_spread);
+        return out;
+    }
 
     static float mis_weight(float pdf_a, float pdf_b) {
         const float denom = pdf_a + pdf_b;
@@ -401,9 +423,11 @@ private:
             if (op < 1.0f) {
                 const float sample = rng.uniform();
                 if (sample > op) {
+                    const float travel = (rec.point - r.origin).length();
                     Ray continued_ray(rec.point + 0.001f * r.direction,
-                                    r.direction,
-                                    r.time);
+                                      r.direction,
+                                      r.time,
+                                      advance_cone(r.cone, travel));
                     return Li_internal(continued_ray, scene, rng, depth, count_emitted);
                 }
             }
@@ -454,7 +478,9 @@ private:
         }
 
         const bool next_count_emitted = is_delta;
-        const Ray scattered(rec.point, wi, r.time);
+        const float travel = (rec.point - r.origin).length();
+        const float roughness = material->cone_roughness(rec);
+        const Ray scattered(rec.point, wi, r.time, scatter_cone(r.cone, travel, roughness, is_delta));
         const Color indirect = weight * Li_internal(scattered, scene, rng, depth + 1, next_count_emitted);
         return emitted + direct + indirect / rr_prob;
     }

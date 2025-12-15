@@ -97,6 +97,10 @@ public:
     virtual Vec3 get_shading_normal(const HitRecord& hit) const {
         return hit.normal;
     }
+
+    virtual float cone_roughness(const HitRecord& /*hit*/) const {
+        return 1.0f;
+    }
 };
 
 using MaterialPtr = std::shared_ptr<Material>;
@@ -113,7 +117,7 @@ public:
             return Color(0.0f);
         }
         const Color albedo =
-            albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+            albedo_ ? albedo_->value(hit) : Color(1.0f);
         return albedo * (1.0f / kPi);
     }
 
@@ -147,7 +151,7 @@ public:
         if (!albedo_) {
             return 1.0f;
         }
-        return albedo_->alpha(hit.u, hit.v, hit.point);
+        return albedo_->alpha(hit);
     }
 
 private:
@@ -185,7 +189,7 @@ public:
         const float G = ggx_G(alpha, n_dot_v, n_dot_l);
 
         const Color f0 =
-            albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+            albedo_ ? albedo_->value(hit) : Color(1.0f);
         const Color F = schlick_fresnel(f0, v_dot_h);
 
         return (D * G) * F / (4.0f * n_dot_v * n_dot_l);
@@ -227,7 +231,7 @@ public:
                 RNG& rng) const override {
         const Vec3 n = get_shading_normal(hit);
         const Color f0 =
-            albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+            albedo_ ? albedo_->value(hit) : Color(1.0f);
 
         if (fuzz_ <= 1e-4f) {
             wi = reflect(-wo, n);
@@ -260,7 +264,11 @@ public:
         if (!albedo_) {
             return 1.0f;
         }
-        return albedo_->alpha(hit.u, hit.v, hit.point);
+        return albedo_->alpha(hit);
+    }
+
+    float cone_roughness(const HitRecord& /*hit*/) const override {
+        return clamp_float(fuzz_, 0.0f, 1.0f);
     }
 
 private:
@@ -286,7 +294,7 @@ public:
         if (!emit_ || !hit.front_face) {
             return Color(0.0f);
         }
-        return emit_->value(hit.u, hit.v, hit.point);
+        return emit_->value(hit);
     }
 
 private:
@@ -336,7 +344,7 @@ public:
         if (!double_sided_ && !hit.front_face) {
             return Color(0.0f);
         }
-        return emission_->value(hit.u, hit.v, hit.point);
+        return emission_->value(hit);
     }
 
     float opacity(const HitRecord& hit) const override {
@@ -400,6 +408,10 @@ public:
         return true;
     }
 
+    float cone_roughness(const HitRecord& /*hit*/) const override {
+        return 0.0f;
+    }
+
 private:
     static float schlick(float cosine, float ref_idx) {
         float r0 = (1.0f - ref_idx) / (1.0f + ref_idx);
@@ -435,7 +447,7 @@ public:
             return Color(0.0f);
         }
         const Color albedo =
-            albedo_ ? albedo_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+            albedo_ ? albedo_->value(hit) : Color(1.0f);
         return albedo * (1.0f / kPi);
     }
 
@@ -469,7 +481,7 @@ public:
         if (!albedo_) {
             return 1.0f;
         }
-        return albedo_->alpha(hit.u, hit.v, hit.point);
+        return albedo_->alpha(hit);
     }
 
 private:
@@ -511,7 +523,11 @@ public:
         if (!base_color_) {
             return 1.0f;
         }
-        return base_color_->alpha(hit.u, hit.v, hit.point);
+        return base_color_->alpha(hit);
+    }
+
+    float cone_roughness(const HitRecord& hit) const override {
+        return clamp_float(roughness(hit), 0.0f, 1.0f);
     }
 
     Color eval(const Vec3& wo,
@@ -524,7 +540,7 @@ public:
             return Color(0.0f);
         }
 
-        const Color base_color = base_color_ ? base_color_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+        const Color base_color = base_color_ ? base_color_->value(hit) : Color(1.0f);
         const float metallic_value = metallic(hit);
         const float alpha = roughness_to_alpha(roughness(hit));
 
@@ -626,12 +642,12 @@ public:
 
 private:
     float metallic(const HitRecord& hit) const {
-        const float tex = metallic_tex_ ? metallic_tex_->value(hit.u, hit.v, hit.point).x : 1.0f;
+        const float tex = metallic_tex_ ? metallic_tex_->value(hit).x : 1.0f;
         return clamp_float(metallic_factor_ * tex, 0.0f, 1.0f);
     }
 
     float roughness(const HitRecord& hit) const {
-        const float tex = roughness_tex_ ? roughness_tex_->value(hit.u, hit.v, hit.point).x : 1.0f;
+        const float tex = roughness_tex_ ? roughness_tex_->value(hit).x : 1.0f;
         return clamp_float(roughness_factor_ * tex, 0.0f, 1.0f);
     }
 
@@ -641,7 +657,7 @@ private:
     }
 
     float specular_probability(const HitRecord& hit) const {
-        const Color base_color = base_color_ ? base_color_->value(hit.u, hit.v, hit.point) : Color(1.0f);
+        const Color base_color = base_color_ ? base_color_->value(hit) : Color(1.0f);
         const float m = metallic(hit);
         const Color dielectric_f0(0.04f);
         const Color f0 = (1.0f - m) * dielectric_f0 + m * base_color;

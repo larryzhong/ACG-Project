@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "core/ray.h"
 #include "core/rng.h"
 #include "core/vec3.h"
@@ -14,6 +16,8 @@ struct CameraSettings {
     float focus_dist;
     float t0;
     float t1;
+    int image_width;
+    int image_height;
 
     CameraSettings()
         : look_from(0.0f, 0.0f, 1.0f),
@@ -24,7 +28,9 @@ struct CameraSettings {
           aperture(0.0f),
           focus_dist(1.0f),
           t0(0.0f),
-          t1(1.0f) {}
+          t1(1.0f),
+          image_width(0),
+          image_height(0) {}
 };
 
 class Camera {
@@ -43,6 +49,7 @@ private:
     float lens_radius_;
     float time0_;
     float time1_;
+    RayCone primary_cone_;
 };
 
 inline Camera::Camera(const CameraSettings& settings) {
@@ -68,6 +75,16 @@ inline Camera::Camera(const CameraSettings& settings) {
     lens_radius_ = settings.aperture * 0.5f;
     time0_ = settings.t0;
     time1_ = settings.t1;
+
+    const int denom_w = std::max(1, settings.image_width - 1);
+    const int denom_h = std::max(1, settings.image_height - 1);
+    const float pixel_w = horizontal_.length() / static_cast<float>(denom_w);
+    const float pixel_h = vertical_.length() / static_cast<float>(denom_h);
+    const float pixel_radius = 0.5f * std::max(pixel_w, pixel_h);
+
+    primary_cone_.width = lens_radius_;
+    primary_cone_.spread_angle =
+        (settings.focus_dist > 1e-6f) ? (pixel_radius / settings.focus_dist) : 0.0f;
 }
 
 inline Ray Camera::generate_ray(float s, float t, RNG& rng) const {
@@ -94,5 +111,5 @@ inline Ray Camera::generate_ray(float s, float t, RNG& rng) const {
 
     const Vec3 direction =
         lower_left_corner_ + s * horizontal_ + t * vertical_ - ray_origin;
-    return Ray(ray_origin, direction, time);
+    return Ray(ray_origin, direction, time, primary_cone_);
 }

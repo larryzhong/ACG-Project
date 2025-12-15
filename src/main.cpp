@@ -94,6 +94,8 @@ int main(int argc, char** argv) {
     CameraSettings cam_settings;
     cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
     cam_settings.vertical_fov_deg = 40.0f;
+    cam_settings.image_width = width;
+    cam_settings.image_height = height;
     
     if (!gltf_path.empty()) {
         GltfLoadOptions options;
