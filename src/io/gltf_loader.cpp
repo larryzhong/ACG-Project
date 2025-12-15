@@ -48,6 +48,47 @@ struct MaterialBuildResult {
     bool emissive = false;
 };
 
+static NormalMapPtr load_normal_map(const tinygltf::Model& model,
+                                    int texture_index,
+                                    const std::filesystem::path& base_dir,
+                                    std::unordered_map<int, NormalMapPtr>& cache,
+                                    std::string* err) {
+    if (texture_index < 0 || texture_index >= static_cast<int>(model.textures.size())) {
+        return nullptr;
+    }
+
+    if (auto it = cache.find(texture_index); it != cache.end()) {
+        return it->second;
+    }
+
+    const tinygltf::Texture& tex = model.textures[texture_index];
+    if (tex.source < 0 || tex.source >= static_cast<int>(model.images.size())) {
+        return nullptr;
+    }
+
+    const tinygltf::Image& image = model.images[tex.source];
+
+    NormalMapPtr result;
+    const bool is_data_uri =
+        image.uri.size() >= 5 && image.uri.rfind("data:", 0) == 0;
+    if (!image.image.empty() && image.width > 0 && image.height > 0) {
+        const int channels = (image.component > 0) ? image.component : 4;
+        result = std::make_shared<NormalMapTexture>(image.image, image.width, image.height, channels);
+    } else if (is_data_uri) {
+        if (err) *err += "Data URI image was not decoded.\n";
+        result = nullptr;
+    } else if (!image.uri.empty()) {
+        std::filesystem::path p = base_dir / std::filesystem::path(image.uri);
+        result = std::make_shared<NormalMapTexture>(p.string());
+    } else {
+        if (err) *err += "Unsupported image source.\n";
+        result = nullptr;
+    }
+
+    cache.emplace(texture_index, result);
+    return result;
+}
+
 static Transform quat_to_transform(const std::vector<double>& q) {
     if (q.size() != 4) {
         return Transform::identity();
@@ -422,6 +463,7 @@ static MaterialBuildResult build_material(const tinygltf::Model& model,
                                          int material_index,
                                          const std::filesystem::path& base_dir,
                                          std::unordered_map<TextureKey, TexturePtr, TextureKeyHash>& texture_cache,
+                                         std::unordered_map<int, NormalMapPtr>& normal_map_cache,
                                          std::string* err) {
     MaterialBuildResult out;
 
@@ -496,18 +538,51 @@ static MaterialBuildResult build_material(const tinygltf::Model& model,
 
     if (emissive_tex) {
         // Wrap the base material with emission so it can both scatter and emit.
-        // This also allows emissive meshes to contribute via indirect paths
-        // even when we don't explicitly sample them as lights.
     }
 
-    const float metallic = static_cast<float>(mat.pbrMetallicRoughness.metallicFactor);
-    const float roughness = static_cast<float>(mat.pbrMetallicRoughness.roughnessFactor);
-    MaterialPtr base_material;
-    if (metallic > 0.5f) {
-        base_material = std::make_shared<Metal>(base_tex, clamp_float(roughness, 0.0f, 1.0f));
-    } else {
-        base_material = std::make_shared<Lambertian>(base_tex);
+    const float metallic_factor = static_cast<float>(mat.pbrMetallicRoughness.metallicFactor);
+    const float roughness_factor = static_cast<float>(mat.pbrMetallicRoughness.roughnessFactor);
+
+    TexturePtr metallic_tex;
+    TexturePtr roughness_tex;
+    if (mat.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0) {
+        // glTF packs roughness in G, metallic in B.
+        roughness_tex = load_texture(model,
+                                     mat.pbrMetallicRoughness.metallicRoughnessTexture.index,
+                                     base_dir,
+                                     ImageTexture::ColorSpace::Linear,
+                                     1,
+                                     texture_cache,
+                                     err);
+        metallic_tex = load_texture(model,
+                                    mat.pbrMetallicRoughness.metallicRoughnessTexture.index,
+                                    base_dir,
+                                    ImageTexture::ColorSpace::Linear,
+                                    2,
+                                    texture_cache,
+                                    err);
     }
+
+    NormalMapPtr normal_map;
+    float normal_strength = 1.0f;
+    if (mat.normalTexture.index >= 0) {
+        normal_map = load_normal_map(model,
+                                     mat.normalTexture.index,
+                                     base_dir,
+                                     normal_map_cache,
+                                     err);
+        if (mat.normalTexture.scale > 0.0) {
+            normal_strength = static_cast<float>(mat.normalTexture.scale);
+        }
+    }
+
+    MaterialPtr base_material = std::make_shared<PrincipledBSDF>(base_tex,
+                                                                 metallic_factor,
+                                                                 metallic_tex,
+                                                                 roughness_factor,
+                                                                 roughness_tex,
+                                                                 normal_map,
+                                                                 normal_strength);
 
     if (emissive_tex) {
         out.material = std::make_shared<EmissiveMaterial>(base_material, emissive_tex, mat.doubleSided);
@@ -649,6 +724,7 @@ static void traverse_node(const tinygltf::Model& model,
                           Scene& out_scene,
                           std::unordered_map<int, MaterialBuildResult>& material_cache,
                           std::unordered_map<TextureKey, TexturePtr, TextureKeyHash>& texture_cache,
+                          std::unordered_map<int, NormalMapPtr>& normal_map_cache,
                           std::vector<std::pair<int, Transform>>& camera_nodes,
                           const std::filesystem::path& base_dir,
                           std::string* err) {
@@ -680,7 +756,7 @@ static void traverse_node(const tinygltf::Model& model,
             if (auto it = material_cache.find(prim.material); it != material_cache.end()) {
                 mat_result = it->second;
             } else {
-                mat_result = build_material(model, prim.material, base_dir, texture_cache, err);
+                mat_result = build_material(model, prim.material, base_dir, texture_cache, normal_map_cache, err);
                 material_cache.emplace(prim.material, mat_result);
             }
 
@@ -701,6 +777,7 @@ static void traverse_node(const tinygltf::Model& model,
                       out_scene,
                       material_cache,
                       texture_cache,
+                      normal_map_cache,
                       camera_nodes,
                       base_dir,
                       err);
@@ -749,6 +826,7 @@ bool load_gltf_scene(const std::string& path,
 
     std::unordered_map<TextureKey, TexturePtr, TextureKeyHash> texture_cache;
     std::unordered_map<int, MaterialBuildResult> material_cache;
+    std::unordered_map<int, NormalMapPtr> normal_map_cache;
     std::vector<std::pair<int, Transform>> camera_nodes;
 
     int scene_index = model.defaultScene >= 0 ? model.defaultScene : 0;
@@ -766,6 +844,7 @@ bool load_gltf_scene(const std::string& path,
                           out_scene,
                           material_cache,
                           texture_cache,
+                          normal_map_cache,
                           camera_nodes,
                           base_dir,
                           out_error ? out_error : &err);

@@ -300,19 +300,54 @@ private:
 
 class NormalMapTexture {
 public:
-    NormalMapTexture() : data_(nullptr), width_(0), height_(0), channels_(0) {}
+    NormalMapTexture()
+        : owned_data_(),
+          data_(nullptr),
+          width_(0),
+          height_(0),
+          channels_(0),
+          owns_memory_(false) {}
 
     explicit NormalMapTexture(const std::string& filename) {
-        data_ = stbi_load(filename.c_str(), &width_, &height_, &channels_, 3);
+        int channels_in_file = 0;
+        data_ = stbi_load(filename.c_str(), &width_, &height_, &channels_in_file, 3);
+        owns_memory_ = false;
         if (!data_) {
             std::cerr << "ERROR: Could not load normal map: " << filename << "\n";
             width_ = height_ = 0;
+            channels_ = 0;
+            return;
+        }
+        channels_ = 3;
+    }
+
+    NormalMapTexture(std::vector<unsigned char> bytes,
+                     int width,
+                     int height,
+                     int channels)
+        : owned_data_(std::move(bytes)),
+          data_(nullptr),
+          width_(width),
+          height_(height),
+          channels_(channels),
+          owns_memory_(true) {
+        if (width_ <= 0 || height_ <= 0 || channels_ <= 0) {
+            width_ = height_ = channels_ = 0;
+            owns_memory_ = false;
+            owned_data_.clear();
+        }
+        if (!owned_data_.empty()) {
+            data_ = owned_data_.data();
+        } else {
+            data_ = nullptr;
         }
     }
 
     ~NormalMapTexture() {
         if (data_) {
-            stbi_image_free(data_);
+            if (!owns_memory_) {
+                stbi_image_free(data_);
+            }
         }
     }
 
@@ -320,10 +355,15 @@ public:
     NormalMapTexture& operator=(const NormalMapTexture&) = delete;
 
     NormalMapTexture(NormalMapTexture&& other) noexcept
-        : data_(other.data_), width_(other.width_),
-          height_(other.height_), channels_(other.channels_) {
+        : owned_data_(std::move(other.owned_data_)),
+          data_(other.data_),
+          width_(other.width_),
+          height_(other.height_),
+          channels_(other.channels_),
+          owns_memory_(other.owns_memory_) {
         other.data_ = nullptr;
         other.width_ = other.height_ = other.channels_ = 0;
+        other.owns_memory_ = false;
     }
 
     Vec3 get_normal(float u, float v) const {
@@ -337,7 +377,8 @@ public:
         int x = static_cast<int>(u * (width_ - 1));
         int y = static_cast<int>(v * (height_ - 1));
 
-        const std::size_t idx = (static_cast<std::size_t>(y) * width_ + x) * 3;
+        const int stride = (channels_ >= 3) ? channels_ : 3;
+        const std::size_t idx = (static_cast<std::size_t>(y) * width_ + x) * static_cast<std::size_t>(stride);
 
         float nx = data_[idx + 0] / 255.0f * 2.0f - 1.0f;
         float ny = data_[idx + 1] / 255.0f * 2.0f - 1.0f;
@@ -363,10 +404,12 @@ public:
     bool valid() const { return data_ != nullptr; }
 
 private:
+    std::vector<unsigned char> owned_data_;
     unsigned char* data_;
     int width_;
     int height_;
     int channels_;
+    bool owns_memory_;
 };
 
 using NormalMapPtr = std::shared_ptr<NormalMapTexture>;

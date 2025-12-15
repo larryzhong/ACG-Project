@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 #include "camera/camera.h"
 #include "core/color.h"
 #include "core/ray.h"
@@ -17,9 +19,10 @@ public:
     explicit PathTracer(int max_depth) : max_depth_(max_depth) {}
 
     Color estimate_direct_lighting(const HitRecord& rec,
-                                const Scene& scene,
-                                const Ray& in_ray,
-                                RNG& rng) const {
+                                   const Scene& scene,
+                                   const Vec3& wo,
+                                   const Ray& in_ray,
+                                   RNG& rng) const {
         Color result(0.0f);
 
         const auto& lights = scene.lights.lights();
@@ -29,6 +32,10 @@ public:
 
         const Vec3 p = rec.point;
         const Vec3 n = rec.material ? rec.material->get_shading_normal(rec) : rec.normal;
+        const Material* bsdf = rec.material;
+        if (!bsdf) {
+            return result;
+        }
 
         for (const auto& light : lights) {
             if (!light.shape) {
@@ -148,7 +155,12 @@ public:
                 continue;
             }
 
-            float weight;
+            const Color f = bsdf->eval(wo, wi, rec);
+            if (f.x <= 0.0f && f.y <= 0.0f && f.z <= 0.0f) {
+                continue;
+            }
+
+            float weight = 0.0f;
             if (is_point_light) {
                 weight = cos_surface / dist_squared;
             } else {
@@ -157,10 +169,10 @@ public:
                 weight = geometry / pdf_area;
             }
 
-            result += emitted * weight;
+            result += emitted * f * weight;
         }
 
-        return result * (1.0f / kPi);
+        return result;
     }
 
     Color Li(const Ray& r,
@@ -204,39 +216,48 @@ private:
             return Color(0.0f);
         }
 
-        ScatterRecord srec;
-        const bool did_scatter = material->scatter(r, rec, srec, rng);
+        const Vec3 wo = normalize(-r.direction);
+
+        Vec3 wi;
+        float pdf = 0.0f;
+        Color f(0.0f);
+        bool is_delta = false;
+        const bool did_sample = material->sample(wo, rec, wi, pdf, f, is_delta, rng);
 
         Color emitted = material->emitted(rec);
-        if (!count_emitted && !did_scatter) {
+        if (!count_emitted && !did_sample) {
             emitted = Color(0.0f);
         }
 
-        if (!did_scatter) {
+        if (!did_sample) {
             return emitted;
         }
 
         Color direct(0.0f);
-        if (!srec.is_specular) {
-            direct = srec.attenuation *
-                    estimate_direct_lighting(rec, scene, r, rng);
+        if (!is_delta) {
+            direct = estimate_direct_lighting(rec, scene, wo, r, rng);
         }
+
+        const Vec3 n = material->get_shading_normal(rec);
+        const float cos_term = std::fabs(dot(n, wi));
+        if (pdf <= 0.0f || cos_term <= 0.0f) {
+            return emitted + direct;
+        }
+
+        Color weight = f * (cos_term / pdf);
 
         float rr_prob = 1.0f;
         if (depth > 3) {
-            float max_attenuation = std::max({srec.attenuation.x, srec.attenuation.y, srec.attenuation.z});
-            rr_prob = std::max(0.05f, std::min(max_attenuation, 0.95f));
+            float max_w = std::max({weight.x, weight.y, weight.z});
+            rr_prob = std::max(0.05f, std::min(max_w, 0.95f));
             if (rng.uniform() >= rr_prob) {
                 return emitted + direct;
             }
         }
 
-        const bool next_count_emitted = srec.is_specular;
-
-        const Color indirect =
-            srec.attenuation *
-            Li_internal(srec.scattered, scene, rng, depth + 1, next_count_emitted);
-
+        const bool next_count_emitted = is_delta;
+        const Ray scattered(rec.point, wi, r.time);
+        const Color indirect = weight * Li_internal(scattered, scene, rng, depth + 1, next_count_emitted);
         return emitted + direct + indirect / rr_prob;
     }
 
