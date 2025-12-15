@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "scene/bvh.h"
+#include "scene/environment.h"
 #include "scene/hittable.h"
 #include "scene/light.h"
 
@@ -12,6 +13,7 @@ public:
     std::vector<HittablePtr> objects;
     HittablePtr accel;
     LightCollection lights;
+    EnvironmentMapPtr environment;
 
     void build_bvh() {
         if (objects.empty()) {

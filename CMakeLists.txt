@@ -9,5 +9,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(pathtracer
     src/main.cpp
     src/io/gltf_loader.cpp
+    src/scene/environment.cpp
 )
 target_include_directories(pathtracer PRIVATE src)

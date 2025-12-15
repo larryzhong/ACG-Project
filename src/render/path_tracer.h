@@ -26,7 +26,8 @@ public:
         Color result(0.0f);
 
         const auto& lights = scene.lights.lights();
-        if (lights.empty()) {
+        const bool has_env = scene.environment && scene.environment->valid();
+        if (lights.empty() && !has_env) {
             return result;
         }
 
@@ -172,6 +173,48 @@ public:
             result += emitted * f * weight;
         }
 
+        if (has_env) {
+            float env_pdf = 0.0f;
+            const Vec3 wi = scene.environment->sample(env_pdf, rng);
+            if (env_pdf > 0.0f) {
+                const float cos_surface = dot(n, wi);
+                if (cos_surface > 0.0f) {
+                    bool occluded = false;
+                    const float shadow_epsilon = 0.001f;
+                    Ray shadow_ray(p + shadow_epsilon * wi, wi, in_ray.time);
+
+                    for (int iter = 0; iter < 256; ++iter) {
+                        HitRecord shadow_rec;
+                        if (!scene.hit(shadow_ray, shadow_epsilon, 1e30f, shadow_rec)) {
+                            break;
+                        }
+
+                        float op = 1.0f;
+                        if (shadow_rec.material) {
+                            op = shadow_rec.material->opacity(shadow_rec);
+                        }
+
+                        if (rng.uniform() < op) {
+                            occluded = true;
+                            break;
+                        }
+
+                        shadow_ray = Ray(shadow_rec.point + shadow_epsilon * wi, wi, in_ray.time);
+                    }
+
+                    if (!occluded) {
+                        const Color Le = scene.environment->Le(wi);
+                        if (Le.x > 0.0f || Le.y > 0.0f || Le.z > 0.0f) {
+                            const Color f = bsdf->eval(wo, wi, rec);
+                            if (f.x > 0.0f || f.y > 0.0f || f.z > 0.0f) {
+                                result += Le * f * (cos_surface / env_pdf);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         return result;
     }
 
@@ -194,6 +237,9 @@ private:
 
         HitRecord rec;
         if (!scene.hit(r, 0.001f, 1e30f, rec)) {
+            if (scene.environment && scene.environment->valid()) {
+                return scene.environment->Le(r.direction);
+            }
             return Color(0.0f);
         }
 

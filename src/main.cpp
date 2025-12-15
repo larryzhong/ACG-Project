@@ -31,6 +31,7 @@ int main(int argc, char** argv) {
     std::string output = "basic_materials.ppm";
     std::string scene_name = "simple";
     std::string gltf_path;
+    std::string env_path;
     bool use_gltf_camera = false;
     bool turntable_mode = false;
     int turntable_frames = 60;
@@ -50,6 +51,8 @@ int main(int argc, char** argv) {
             scene_name = argv[++i];
         } else if (arg == "--gltf" && i + 1 < argc) {
             gltf_path = argv[++i];
+        } else if (arg == "--env" && i + 1 < argc) {
+            env_path = argv[++i];
         } else if (arg == "--spp" && i + 1 < argc) {
             samples_per_pixel = std::atoi(argv[++i]);
         } else if (arg == "--max-depth" && i + 1 < argc) {
@@ -158,6 +161,18 @@ int main(int argc, char** argv) {
     else {
         std::cerr << "Unknown scene name: " << scene_name << "\n";
         return 1;
+    }
+
+    if (!env_path.empty()) {
+        scene.environment = std::make_shared<EnvironmentMap>();
+        std::string env_error;
+        if (!scene.environment->load_hdr(env_path, &env_error)) {
+            std::cerr << "Failed to load environment: " << env_path << "\n";
+            if (!env_error.empty()) {
+                std::cerr << env_error << "\n";
+            }
+            return 1;
+        }
     }
 
     scene.build_bvh();
