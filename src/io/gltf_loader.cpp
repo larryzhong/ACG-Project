@@ -767,6 +767,9 @@ static void traverse_node(const tinygltf::Model& model,
 
             auto obj = std::make_shared<Mesh>(data, world, mat_result.material);
             out_scene.objects.push_back(obj);
+            if (mat_result.emissive) {
+                out_scene.lights.add_area_light(obj);
+            }
         }
     }
 

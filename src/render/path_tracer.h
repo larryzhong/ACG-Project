@@ -10,6 +10,7 @@
 #include "render/film.h"
 #include "render/integrator.h"
 #include "scene/material.h"
+#include "scene/mesh.h"
 #include "scene/scene.h"
 #include "scene/quad.h"
 #include "scene/sphere.h"
@@ -17,6 +18,14 @@
 class PathTracer : public Integrator {
 public:
     explicit PathTracer(int max_depth) : max_depth_(max_depth) {}
+
+    static float mis_weight(float pdf_a, float pdf_b) {
+        const float denom = pdf_a + pdf_b;
+        if (denom <= 0.0f) {
+            return 0.0f;
+        }
+        return pdf_a / denom;
+    }
 
     Color estimate_direct_lighting(const HitRecord& rec,
                                    const Scene& scene,
@@ -27,7 +36,8 @@ public:
 
         const auto& lights = scene.lights.lights();
         const bool has_env = scene.environment && scene.environment->valid();
-        if (lights.empty() && !has_env) {
+        const int light_count = static_cast<int>(lights.size()) + (has_env ? 1 : 0);
+        if (light_count <= 0) {
             return result;
         }
 
@@ -38,182 +48,179 @@ public:
             return result;
         }
 
-        for (const auto& light : lights) {
-            if (!light.shape) {
-                continue;
+        const float choose = rng.uniform() * static_cast<float>(light_count);
+        const int picked = std::min(static_cast<int>(choose), light_count - 1);
+
+        if (has_env && picked == static_cast<int>(lights.size())) {
+            float pdf_env = 0.0f;
+            const Vec3 wi = scene.environment->sample(pdf_env, rng);
+            if (pdf_env <= 0.0f) {
+                return result;
             }
-
-            const Hittable* shape = light.shape.get();
-
-            Vec3 light_pos;
-            Vec3 light_normal;
-            float pdf_area = 0.0f;
-            const Material* light_material = nullptr;
-            bool is_point_light = (light.type == LightType::Point);
-
-            if (const auto* sphere = dynamic_cast<const Sphere*>(shape)) {
-                const float radius = sphere->radius();
-                light_material = sphere->material();
-
-                if (is_point_light) {
-                    light_pos = sphere->center();
-                    light_normal = Vec3(0.0f, 1.0f, 0.0f);
-                } else {
-                    if (radius <= 0.0f) continue;
-
-                    const Vec3 d = random_unit_vector(rng);
-                    light_pos = sphere->center() + radius * d;
-                    light_normal = d;
-
-                    const float area = 4.0f * kPi * radius * radius;
-                    pdf_area = area > 0.0f ? 1.0f / area : 0.0f;
-                }
-            } else if (const auto* quad = dynamic_cast<const Quad*>(shape)) {
-                if (is_point_light) continue;
-
-                const float su = rng.uniform();
-                const float sv = rng.uniform();
-
-                light_pos = quad->p0() + su * quad->u() + sv * quad->v();
-                light_normal = quad->normal();
-
-                const float area = quad->area();
-                pdf_area = area > 0.0f ? 1.0f / area : 0.0f;
-                light_material = quad->material();
-            } else {
-                continue;
-            }
-
-            if (!light_material || !is_point_light && pdf_area <= 0.0f) {
-                continue;
-            }
-
-            Vec3 to_light = light_pos - p;
-            const float dist_squared = to_light.length_squared();
-            if (dist_squared <= 0.000001f) continue;
-
-            const float dist = std::sqrt(dist_squared);
-            const Vec3 wi = to_light / dist;
 
             const float cos_surface = dot(n, wi);
-
             if (cos_surface <= 0.0f) {
-                continue;
+                return result;
             }
 
-            if (!is_point_light) {
-                const float cos_light = dot(light_normal, -wi);
-                if (cos_light <= 0.0f) {
-                    continue;
-                }
-            }
-
-            bool occluded = false;
             const float shadow_epsilon = 0.001f;
-            
             Ray shadow_ray(p + shadow_epsilon * wi, wi, in_ray.time);
-            
-            float current_t_max = dist - 2.0f * shadow_epsilon;
-
-            while (true) {
-                HitRecord shadow_rec;
-                if (!scene.hit(shadow_ray, shadow_epsilon, current_t_max, shadow_rec)) {
-                    break;
-                }
-
-                float op = 1.0f;
-                if (shadow_rec.material) {
-                    op = shadow_rec.material->opacity(shadow_rec);
-                }
-
-                if (rng.uniform() < op) {
-                    occluded = true;
-                    break;
-                }
-
-                shadow_ray = Ray(shadow_rec.point + shadow_epsilon * wi, wi, in_ray.time);
-                
-                current_t_max -= (shadow_rec.t + shadow_epsilon);
-
-                if (current_t_max <= 0.0f) {
-                    break; 
-                }
+            HitRecord shadow_rec;
+            if (trace_first_hit(scene, shadow_ray, shadow_epsilon, 1e30f, rng, shadow_rec)) {
+                return result;
             }
 
-            if (occluded) {
-                continue;
-            }
-
-            HitRecord light_rec;
-            light_rec.point = light_pos;
-            light_rec.normal = light_normal;
-            light_rec.front_face = true; 
-            light_rec.u = 0.0f;
-            light_rec.v = 0.0f;
-
-            const Color emitted = light_material->emitted(light_rec);
-            if (emitted.x <= 0.0f && emitted.y <= 0.0f && emitted.z <= 0.0f) {
-                continue;
+            const Color Le = scene.environment->Le(wi);
+            if (Le.x <= 0.0f && Le.y <= 0.0f && Le.z <= 0.0f) {
+                return result;
             }
 
             const Color f = bsdf->eval(wo, wi, rec);
             if (f.x <= 0.0f && f.y <= 0.0f && f.z <= 0.0f) {
-                continue;
+                return result;
             }
 
-            float weight = 0.0f;
+            const float pdf_light = (pdf_env / static_cast<float>(light_count));
+            const float pdf_bsdf = bsdf->pdf(wo, wi, rec);
+            const float w = mis_weight(pdf_light, pdf_bsdf);
+            result += Le * f * (cos_surface / pdf_light) * w;
+            return result;
+        }
+
+        if (picked < 0 || picked >= static_cast<int>(lights.size())) {
+            return result;
+        }
+
+        const Light& light = lights[static_cast<std::size_t>(picked)];
+        if (!light.shape) {
+            return result;
+        }
+
+        const Hittable* shape = light.shape.get();
+        const bool is_point_light = (light.type == LightType::Point);
+
+        Vec3 light_pos;
+        Vec3 light_normal;
+        float light_u = 0.0f;
+        float light_v = 0.0f;
+        float pdf_area = 0.0f;
+        const Material* light_material = nullptr;
+
+        if (const auto* sphere = dynamic_cast<const Sphere*>(shape)) {
+            const float radius = sphere->radius();
+            light_material = sphere->material();
+
             if (is_point_light) {
-                weight = cos_surface / dist_squared;
+                light_pos = sphere->center();
+                light_normal = Vec3(0.0f, 1.0f, 0.0f);
             } else {
-                const float cos_light = dot(light_normal, -wi);
-                const float geometry = (cos_surface * cos_light) / dist_squared;
-                weight = geometry / pdf_area;
-            }
-
-            result += emitted * f * weight;
-        }
-
-        if (has_env) {
-            float env_pdf = 0.0f;
-            const Vec3 wi = scene.environment->sample(env_pdf, rng);
-            if (env_pdf > 0.0f) {
-                const float cos_surface = dot(n, wi);
-                if (cos_surface > 0.0f) {
-                    bool occluded = false;
-                    const float shadow_epsilon = 0.001f;
-                    Ray shadow_ray(p + shadow_epsilon * wi, wi, in_ray.time);
-
-                    for (int iter = 0; iter < 256; ++iter) {
-                        HitRecord shadow_rec;
-                        if (!scene.hit(shadow_ray, shadow_epsilon, 1e30f, shadow_rec)) {
-                            break;
-                        }
-
-                        float op = 1.0f;
-                        if (shadow_rec.material) {
-                            op = shadow_rec.material->opacity(shadow_rec);
-                        }
-
-                        if (rng.uniform() < op) {
-                            occluded = true;
-                            break;
-                        }
-
-                        shadow_ray = Ray(shadow_rec.point + shadow_epsilon * wi, wi, in_ray.time);
-                    }
-
-                    if (!occluded) {
-                        const Color Le = scene.environment->Le(wi);
-                        if (Le.x > 0.0f || Le.y > 0.0f || Le.z > 0.0f) {
-                            const Color f = bsdf->eval(wo, wi, rec);
-                            if (f.x > 0.0f || f.y > 0.0f || f.z > 0.0f) {
-                                result += Le * f * (cos_surface / env_pdf);
-                            }
-                        }
-                    }
+                if (radius <= 0.0f) {
+                    return result;
                 }
+
+                const Vec3 d = random_unit_vector(rng);
+                light_pos = sphere->center() + radius * d;
+                light_normal = d;
+
+                const float area = 4.0f * kPi * radius * radius;
+                pdf_area = area > 0.0f ? 1.0f / area : 0.0f;
             }
+        } else if (const auto* quad = dynamic_cast<const Quad*>(shape)) {
+            if (is_point_light) {
+                return result;
+            }
+
+            const float su = rng.uniform();
+            const float sv = rng.uniform();
+
+            light_pos = quad->p0() + su * quad->u() + sv * quad->v();
+            light_normal = quad->normal();
+            light_u = su;
+            light_v = sv;
+
+            const float area = quad->area();
+            pdf_area = area > 0.0f ? 1.0f / area : 0.0f;
+            light_material = quad->material();
+        } else if (const auto* mesh = dynamic_cast<const Mesh*>(shape)) {
+            if (is_point_light) {
+                return result;
+            }
+            light_material = mesh->material();
+            if (!mesh->sample_surface(rng, light_pos, light_normal, light_u, light_v, pdf_area)) {
+                return result;
+            }
+        } else {
+            return result;
         }
+
+        if (!light_material) {
+            return result;
+        }
+
+        Vec3 to_light = light_pos - p;
+        const float dist_squared = to_light.length_squared();
+        if (dist_squared <= 0.000001f) {
+            return result;
+        }
+
+        const float dist = std::sqrt(dist_squared);
+        const Vec3 wi = to_light / dist;
+
+        const float cos_surface = dot(n, wi);
+        if (cos_surface <= 0.0f) {
+            return result;
+        }
+
+        float pdf_dir_given_light = 0.0f;
+        if (!is_point_light) {
+            if (pdf_area <= 0.0f) {
+                return result;
+            }
+            const float cos_light = std::fabs(dot(light_normal, -wi));
+            if (cos_light <= 0.0f) {
+                return result;
+            }
+            pdf_dir_given_light = pdf_area * dist_squared / cos_light;
+        }
+
+        const float shadow_epsilon = 0.001f;
+        Ray shadow_ray(p + shadow_epsilon * wi, wi, in_ray.time);
+        HitRecord shadow_rec;
+        if (trace_first_hit(scene, shadow_ray, shadow_epsilon, dist - 2.0f * shadow_epsilon, rng, shadow_rec)) {
+            return result;
+        }
+
+        HitRecord light_rec;
+        light_rec.point = light_pos;
+        light_rec.t = dist;
+        light_rec.u = light_u;
+        light_rec.v = light_v;
+        light_rec.material = light_material;
+        light_rec.object = shape;
+        light_rec.front_face = (dot(wi, light_normal) < 0.0f);
+        light_rec.normal = light_rec.front_face ? light_normal : -light_normal;
+        light_rec.tangent = Vec3(1.0f, 0.0f, 0.0f);
+
+        const Color Le = light_material->emitted(light_rec);
+        if (Le.x <= 0.0f && Le.y <= 0.0f && Le.z <= 0.0f) {
+            return result;
+        }
+
+        const Color f = bsdf->eval(wo, wi, rec);
+        if (f.x <= 0.0f && f.y <= 0.0f && f.z <= 0.0f) {
+            return result;
+        }
+
+        if (is_point_light) {
+            const float scale = static_cast<float>(light_count);
+            result += scale * Le * f * (cos_surface / dist_squared);
+            return result;
+        }
+
+        const float pdf_light = (pdf_dir_given_light / static_cast<float>(light_count));
+        const float pdf_bsdf = bsdf->pdf(wo, wi, rec);
+        const float w = mis_weight(pdf_light, pdf_bsdf);
+        result += Le * f * (cos_surface / pdf_light) * w;
 
         return result;
     }
@@ -226,6 +233,147 @@ public:
     }
 
 private:
+    static bool is_light_surface(const Scene& scene, const Hittable* obj) {
+        if (!obj) {
+            return false;
+        }
+        for (const auto& light : scene.lights.lights()) {
+            if (light.shape && light.shape.get() == obj) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static bool trace_first_hit(const Scene& scene,
+                                Ray ray,
+                                float t_min,
+                                float t_max,
+                                RNG& rng,
+                                HitRecord& out_rec) {
+        float current_t_max = t_max;
+        const float eps = 0.001f;
+        for (int iter = 0; iter < 256; ++iter) {
+            HitRecord rec;
+            if (!scene.hit(ray, t_min, current_t_max, rec)) {
+                return false;
+            }
+
+            float op = 1.0f;
+            if (rec.material) {
+                op = rec.material->opacity(rec);
+            }
+
+            if (rng.uniform() < op) {
+                out_rec = rec;
+                return true;
+            }
+
+            ray = Ray(rec.point + eps * ray.direction, ray.direction, ray.time);
+            current_t_max -= (rec.t + eps);
+            if (current_t_max <= 0.0f) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    static float light_pdf_direction(const Scene& scene,
+                                     const Vec3& p,
+                                     const Vec3& wi,
+                                     const HitRecord& light_hit) {
+        if (!is_light_surface(scene, light_hit.object)) {
+            return 0.0f;
+        }
+
+        const Vec3 diff = light_hit.point - p;
+        const float dist_squared = diff.length_squared();
+        if (dist_squared <= 0.0f) {
+            return 0.0f;
+        }
+
+        const float cos_light = std::fabs(dot(light_hit.normal, -wi));
+        if (cos_light <= 0.0f) {
+            return 0.0f;
+        }
+
+        float area = 0.0f;
+        if (const auto* quad = dynamic_cast<const Quad*>(light_hit.object)) {
+            area = quad->area();
+        } else if (const auto* sphere = dynamic_cast<const Sphere*>(light_hit.object)) {
+            const float r = sphere->radius();
+            area = 4.0f * kPi * r * r;
+        } else if (const auto* mesh = dynamic_cast<const Mesh*>(light_hit.object)) {
+            area = mesh->area();
+        } else {
+            return 0.0f;
+        }
+
+        if (area <= 0.0f) {
+            return 0.0f;
+        }
+
+        return dist_squared / (cos_light * area);
+    }
+
+    Color bsdf_sample_emitter(const Scene& scene,
+                              const HitRecord& rec,
+                              const Ray& in_ray,
+                              const Vec3& wi,
+                              const Color& f,
+                              float pdf_bsdf,
+                              RNG& rng) const {
+        const auto& lights = scene.lights.lights();
+        const bool has_env = scene.environment && scene.environment->valid();
+        const int light_count = static_cast<int>(lights.size()) + (has_env ? 1 : 0);
+        if (light_count <= 0 || pdf_bsdf <= 0.0f) {
+            return Color(0.0f);
+        }
+
+        const Vec3 n = rec.material ? rec.material->get_shading_normal(rec) : rec.normal;
+        const float cos_surface = dot(n, wi);
+        if (cos_surface <= 0.0f) {
+            return Color(0.0f);
+        }
+
+        const float eps = 0.001f;
+        Ray ray(rec.point + eps * wi, wi, in_ray.time);
+
+        HitRecord hit;
+        if (!trace_first_hit(scene, ray, eps, 1e30f, rng, hit)) {
+            if (!has_env) {
+                return Color(0.0f);
+            }
+
+            const Color Le = scene.environment->Le(wi);
+            if (Le.x <= 0.0f && Le.y <= 0.0f && Le.z <= 0.0f) {
+                return Color(0.0f);
+            }
+
+            const float pdf_light = scene.environment->pdf(wi) / static_cast<float>(light_count);
+            const float w = mis_weight(pdf_bsdf, pdf_light);
+            return Le * f * (cos_surface / pdf_bsdf) * w;
+        }
+
+        if (!hit.material || !is_light_surface(scene, hit.object)) {
+            return Color(0.0f);
+        }
+
+        const Color Le = hit.material->emitted(hit);
+        if (Le.x <= 0.0f && Le.y <= 0.0f && Le.z <= 0.0f) {
+            return Color(0.0f);
+        }
+
+        const float pdf_dir = light_pdf_direction(scene, rec.point, wi, hit);
+        if (pdf_dir <= 0.0f) {
+            return Color(0.0f);
+        }
+
+        const float pdf_light = pdf_dir / static_cast<float>(light_count);
+        const float w = mis_weight(pdf_bsdf, pdf_light);
+        return Le * f * (cos_surface / pdf_bsdf) * w;
+    }
+
     Color Li_internal(const Ray& r,
                     const Scene& scene,
                     RNG& rng,
@@ -238,6 +386,9 @@ private:
         HitRecord rec;
         if (!scene.hit(r, 0.001f, 1e30f, rec)) {
             if (scene.environment && scene.environment->valid()) {
+                if (!count_emitted) {
+                    return Color(0.0f);
+                }
                 return scene.environment->Le(r.direction);
             }
             return Color(0.0f);
@@ -271,7 +422,7 @@ private:
         const bool did_sample = material->sample(wo, rec, wi, pdf, f, is_delta, rng);
 
         Color emitted = material->emitted(rec);
-        if (!count_emitted && !did_sample) {
+        if (!count_emitted && is_light_surface(scene, rec.object)) {
             emitted = Color(0.0f);
         }
 
@@ -282,6 +433,7 @@ private:
         Color direct(0.0f);
         if (!is_delta) {
             direct = estimate_direct_lighting(rec, scene, wo, r, rng);
+            direct += bsdf_sample_emitter(scene, rec, r, wi, f, pdf, rng);
         }
 
         const Vec3 n = material->get_shading_normal(rec);

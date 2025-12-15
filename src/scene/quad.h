@@ -103,6 +103,7 @@ public:
         rec.u = a;
         rec.v = b;
         rec.material = material_.get();
+        rec.object = this;
         rec.set_face_normal(r, normal_);
 
         rec.tangent = normalize(u_);

@@ -7,8 +7,10 @@
 #include <vector>
 
 #include "core/ray.h"
+#include "core/rng.h"
 #include "core/vec2.h"
 #include "core/vec3.h"
+#include "core/color.h"
 #include "math/aabb.h"
 #include "math/transform.h"
 #include "scene/hittable.h"
@@ -140,7 +142,43 @@ public:
         rec.tangent = rec.front_face ? ortho_tangent : -ortho_tangent;
 
         rec.material = nullptr;
+        rec.object = nullptr;
 
+        return true;
+    }
+
+    bool triangle_vertices(std::uint32_t tri,
+                           Vec3& out_p0,
+                           Vec3& out_p1,
+                           Vec3& out_p2,
+                           Vec2& out_uv0,
+                           Vec2& out_uv1,
+                           Vec2& out_uv2) const {
+        const std::size_t tri_count = triangle_count();
+        if (tri_count == 0 || tri >= tri_count) {
+            return false;
+        }
+
+        const std::size_t i0 = indices_[3 * static_cast<std::size_t>(tri) + 0];
+        const std::size_t i1 = indices_[3 * static_cast<std::size_t>(tri) + 1];
+        const std::size_t i2 = indices_[3 * static_cast<std::size_t>(tri) + 2];
+
+        if (i0 >= positions_.size() || i1 >= positions_.size() || i2 >= positions_.size()) {
+            return false;
+        }
+        if (uvs_.empty() || i0 >= uvs_.size() || i1 >= uvs_.size() || i2 >= uvs_.size()) {
+            out_uv0 = Vec2(0.0f);
+            out_uv1 = Vec2(0.0f);
+            out_uv2 = Vec2(0.0f);
+        } else {
+            out_uv0 = uvs_[i0];
+            out_uv1 = uvs_[i1];
+            out_uv2 = uvs_[i2];
+        }
+
+        out_p0 = positions_[i0];
+        out_p1 = positions_[i1];
+        out_p2 = positions_[i2];
         return true;
     }
 
@@ -471,6 +509,7 @@ public:
         if (data_) {
             world_bounds_ = transform_aabb(data_->bounding_box(), transform_);
         }
+        build_light_distribution();
     }
 
     Mesh(const MeshDataPtr& data, const MaterialPtr& material)
@@ -516,6 +555,7 @@ public:
         rec.tangent = world_tangent;
 
         rec.material = material_.get();
+        rec.object = this;
 
         return true;
     }
@@ -524,9 +564,109 @@ public:
         return world_bounds_;
     }
 
+    const Material* material() const {
+        return material_.get();
+    }
+
+    float area() const {
+        return total_area_;
+    }
+
+    bool sample_surface(RNG& rng,
+                        Vec3& out_pos,
+                        Vec3& out_normal,
+                        float& out_u,
+                        float& out_v,
+                        float& out_pdf_area) const {
+        if (!data_ || total_area_ <= 0.0f || tri_cdf_.empty()) {
+            return false;
+        }
+
+        const float uu = clamp_float(rng.uniform(), 0.0f, 0.99999994f);
+        auto it = std::upper_bound(tri_cdf_.begin() + 1, tri_cdf_.end(), uu);
+        std::size_t tri = static_cast<std::size_t>((it - tri_cdf_.begin()) - 1);
+        if (tri >= data_->triangle_count()) {
+            tri = data_->triangle_count() - 1;
+        }
+
+        Vec3 p0, p1, p2;
+        Vec2 uv0, uv1, uv2;
+        if (!data_->triangle_vertices(static_cast<std::uint32_t>(tri), p0, p1, p2, uv0, uv1, uv2)) {
+            return false;
+        }
+
+        const float r1 = std::sqrt(rng.uniform());
+        const float r2 = rng.uniform();
+        const float b0 = 1.0f - r1;
+        const float b1 = r1 * (1.0f - r2);
+        const float b2 = r1 * r2;
+
+        const Vec3 local_pos = b0 * p0 + b1 * p1 + b2 * p2;
+        const Vec2 local_uv = b0 * uv0 + b1 * uv1 + b2 * uv2;
+
+        const Vec3 w0 = transform_.apply_point(p0);
+        const Vec3 w1 = transform_.apply_point(p1);
+        const Vec3 w2 = transform_.apply_point(p2);
+        Vec3 gn = cross(w1 - w0, w2 - w0);
+        if (gn.length_squared() > 1e-20f) {
+            gn = normalize(gn);
+        } else {
+            gn = Vec3(0.0f, 1.0f, 0.0f);
+        }
+
+        out_pos = transform_.apply_point(local_pos);
+        out_normal = gn;
+        out_u = local_uv.x;
+        out_v = local_uv.y;
+        out_pdf_area = 1.0f / total_area_;
+        return true;
+    }
+
 private:
+    void build_light_distribution() {
+        total_area_ = 0.0f;
+        tri_cdf_.clear();
+        if (!data_) {
+            return;
+        }
+
+        const std::size_t tri_count = data_->triangle_count();
+        tri_cdf_.assign(tri_count + 1, 0.0f);
+        if (tri_count == 0) {
+            return;
+        }
+
+        for (std::size_t tri = 0; tri < tri_count; ++tri) {
+            Vec3 p0, p1, p2;
+            Vec2 uv0, uv1, uv2;
+            if (!data_->triangle_vertices(static_cast<std::uint32_t>(tri), p0, p1, p2, uv0, uv1, uv2)) {
+                tri_cdf_[tri + 1] = total_area_;
+                continue;
+            }
+
+            const Vec3 w0 = transform_.apply_point(p0);
+            const Vec3 w1 = transform_.apply_point(p1);
+            const Vec3 w2 = transform_.apply_point(p2);
+            const float a = 0.5f * cross(w1 - w0, w2 - w0).length();
+            total_area_ += std::max(0.0f, a);
+            tri_cdf_[tri + 1] = total_area_;
+        }
+
+        if (total_area_ <= 0.0f) {
+            tri_cdf_.clear();
+            return;
+        }
+
+        const float inv = 1.0f / total_area_;
+        for (std::size_t i = 1; i < tri_cdf_.size(); ++i) {
+            tri_cdf_[i] *= inv;
+        }
+    }
+
     MeshDataPtr data_;
     Transform transform_;
     AABB world_bounds_;
     MaterialPtr material_;
+    float total_area_ = 0.0f;
+    std::vector<float> tri_cdf_;
 };

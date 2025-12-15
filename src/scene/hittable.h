@@ -7,6 +7,7 @@
 #include "math/aabb.h"
 
 class Material;
+class Hittable;
 
 struct HitRecord {
     Vec3 point;
@@ -16,6 +17,7 @@ struct HitRecord {
     float u;
     float v;
     const Material* material;
+    const Hittable* object = nullptr;
     bool front_face;
 
     void set_face_normal(const Ray& r, const Vec3& outward_normal) {
