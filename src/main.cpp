@@ -10,6 +10,7 @@
 #include "core/rng.h"
 #include "core/vec3.h"
 #include "io/image_io.h"
+#include "io/gltf_loader.h"
 #include "io/simple_scene_builder.h"
 #include "render/film.h"
 #include "render/path_tracer.h"
@@ -29,6 +30,8 @@ int main(int argc, char** argv) {
     float shutter_close = 1.0f;
     std::string output = "basic_materials.ppm";
     std::string scene_name = "simple";
+    std::string gltf_path;
+    bool use_gltf_camera = false;
     bool turntable_mode = false;
     int turntable_frames = 60;
     float turntable_radius = 0.0f;
@@ -45,6 +48,8 @@ int main(int argc, char** argv) {
             height = std::atoi(argv[++i]);
         } else if (arg == "--scene" && i + 1 < argc) {
             scene_name = argv[++i];
+        } else if (arg == "--gltf" && i + 1 < argc) {
+            gltf_path = argv[++i];
         } else if (arg == "--spp" && i + 1 < argc) {
             samples_per_pixel = std::atoi(argv[++i]);
         } else if (arg == "--max-depth" && i + 1 < argc) {
@@ -70,6 +75,8 @@ int main(int argc, char** argv) {
             float cy = static_cast<float>(std::atof(argv[++i]));
             float cz = static_cast<float>(std::atof(argv[++i]));
             turntable_center = Vec3(cx, cy, cz);
+        } else if (arg == "--gltf-camera") {
+            use_gltf_camera = true;
         }
     }
 
@@ -85,7 +92,19 @@ int main(int argc, char** argv) {
     cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
     cam_settings.vertical_fov_deg = 40.0f;
     
-    if (scene_name == "simple") {
+    if (!gltf_path.empty()) {
+        GltfLoadOptions options;
+        options.use_first_camera = use_gltf_camera;
+        std::string gltf_error;
+        if (!load_gltf_scene(gltf_path, scene, &cam_settings, &gltf_error, options)) {
+            std::cerr << "Failed to load glTF: " << gltf_path << "\n";
+            if (!gltf_error.empty()) {
+                std::cerr << gltf_error << "\n";
+            }
+            return 1;
+        }
+        scene_name = gltf_path;
+    } else if (scene_name == "simple") {
         scene = build_simple_scene_basic();
         cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
         cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
@@ -143,7 +162,9 @@ int main(int argc, char** argv) {
 
     scene.build_bvh();
 
-    cam_settings.up = Vec3(0.0f, 1.0f, 0.0f);
+    if (!use_gltf_camera) {
+        cam_settings.up = Vec3(0.0f, 1.0f, 0.0f);
+    }
     cam_settings.aperture = aperture;
     cam_settings.t0 = shutter_open;
     cam_settings.t1 = shutter_close;

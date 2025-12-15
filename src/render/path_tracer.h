@@ -200,17 +200,19 @@ private:
             }
         }
 
-        Color emitted(0.0f);
-        if (material && count_emitted) {
-            emitted = material->emitted(rec);
-        }
-
         if (!material) {
-            return emitted;
+            return Color(0.0f);
         }
 
         ScatterRecord srec;
-        if (!material->scatter(r, rec, srec, rng)) {
+        const bool did_scatter = material->scatter(r, rec, srec, rng);
+
+        Color emitted = material->emitted(rec);
+        if (!count_emitted && !did_scatter) {
+            emitted = Color(0.0f);
+        }
+
+        if (!did_scatter) {
             return emitted;
         }
 

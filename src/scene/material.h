@@ -93,6 +93,13 @@ public:
         return dot(srec.scattered.direction, hit.normal) > 0.0f;
     }
 
+    float opacity(const HitRecord& hit) const override {
+        if (!albedo_) {
+            return 1.0f;
+        }
+        return albedo_->alpha(hit.u, hit.v, hit.point);
+    }
+
 private:
     TexturePtr albedo_;
     float fuzz_;
@@ -118,6 +125,51 @@ public:
 
 private:
     TexturePtr emit_;
+};
+
+class EmissiveMaterial : public Material {
+public:
+    EmissiveMaterial(const MaterialPtr& base, const TexturePtr& emission, bool double_sided = false)
+        : base_(base), emission_(emission), double_sided_(double_sided) {}
+
+    bool scatter(const Ray& r_in,
+                 const HitRecord& hit,
+                 ScatterRecord& srec,
+                 RNG& rng) const override {
+        if (!base_) {
+            return false;
+        }
+        return base_->scatter(r_in, hit, srec, rng);
+    }
+
+    Color emitted(const HitRecord& hit) const override {
+        if (!emission_) {
+            return Color(0.0f);
+        }
+        if (!double_sided_ && !hit.front_face) {
+            return Color(0.0f);
+        }
+        return emission_->value(hit.u, hit.v, hit.point);
+    }
+
+    float opacity(const HitRecord& hit) const override {
+        if (!base_) {
+            return 1.0f;
+        }
+        return base_->opacity(hit);
+    }
+
+    Vec3 get_shading_normal(const HitRecord& hit) const override {
+        if (!base_) {
+            return hit.normal;
+        }
+        return base_->get_shading_normal(hit);
+    }
+
+private:
+    MaterialPtr base_;
+    TexturePtr emission_;
+    bool double_sided_ = false;
 };
 
 class Dielectric : public Material {

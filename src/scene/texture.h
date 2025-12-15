@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cmath>
+#include <iostream>
 #include <memory>
+#include <vector>
 
 #include "core/color.h"
 #include "core/vec3.h"
@@ -83,9 +86,30 @@ private:
 
 class ImageTexture : public Texture {
 public:
-    ImageTexture() : data_(nullptr), width_(0), height_(0), channels_(0) {}
+    enum class ColorSpace {
+        sRGB,
+        Linear
+    };
 
-    explicit ImageTexture(const std::string& filename) {
+    ImageTexture()
+        : data_(nullptr),
+          width_(0),
+          height_(0),
+          channels_(0),
+          color_space_(ColorSpace::sRGB),
+          channel_(-1),
+          owns_memory_(false) {}
+
+    explicit ImageTexture(const std::string& filename,
+                          ColorSpace color_space = ColorSpace::sRGB,
+                          int channel = -1)
+        : data_(nullptr),
+          width_(0),
+          height_(0),
+          channels_(0),
+          color_space_(color_space),
+          channel_(channel),
+          owns_memory_(false) {
         data_ = stbi_load(filename.c_str(), &width_, &height_, &channels_, 0);
         if (!data_) {
             std::cerr << "ERROR: Could not load texture image: " << filename << "\n";
@@ -93,9 +117,37 @@ public:
         }
     }
 
+    ImageTexture(std::vector<unsigned char> bytes,
+                 int width,
+                 int height,
+                 int channels,
+                 ColorSpace color_space = ColorSpace::sRGB,
+                 int channel = -1)
+        : owned_data_(std::move(bytes)),
+          data_(nullptr),
+          width_(width),
+          height_(height),
+          channels_(channels),
+          color_space_(color_space),
+          channel_(channel),
+          owns_memory_(true) {
+        if (width_ <= 0 || height_ <= 0 || channels_ <= 0) {
+            width_ = height_ = channels_ = 0;
+            owns_memory_ = false;
+            owned_data_.clear();
+        }
+        if (!owned_data_.empty()) {
+            data_ = owned_data_.data();
+        } else {
+            data_ = nullptr;
+        }
+    }
+
     ~ImageTexture() {
         if (data_) {
-            stbi_image_free(data_);
+            if (!owns_memory_) {
+                stbi_image_free(data_);
+            }
         }
     }
 
@@ -105,21 +157,37 @@ public:
 
     // Enable move
     ImageTexture(ImageTexture&& other) noexcept
-        : data_(other.data_), width_(other.width_),
-          height_(other.height_), channels_(other.channels_) {
+        : owned_data_(std::move(other.owned_data_)),
+          data_(other.data_),
+          width_(other.width_),
+          height_(other.height_),
+          channels_(other.channels_),
+          color_space_(other.color_space_),
+          channel_(other.channel_),
+          owns_memory_(other.owns_memory_) {
         other.data_ = nullptr;
         other.width_ = other.height_ = other.channels_ = 0;
+        other.owns_memory_ = false;
     }
 
     ImageTexture& operator=(ImageTexture&& other) noexcept {
         if (this != &other) {
-            if (data_) stbi_image_free(data_);
+            if (data_) {
+                if (!owns_memory_) {
+                    stbi_image_free(data_);
+                }
+            }
+            owned_data_ = std::move(other.owned_data_);
             data_ = other.data_;
             width_ = other.width_;
             height_ = other.height_;
             channels_ = other.channels_;
+            color_space_ = other.color_space_;
+            channel_ = other.channel_;
+            owns_memory_ = other.owns_memory_;
             other.data_ = nullptr;
             other.width_ = other.height_ = other.channels_ = 0;
+            other.owns_memory_ = false;
         }
         return *this;
     }
@@ -158,7 +226,7 @@ public:
     }
 
     float alpha(float u, float v, const Vec3& /*p*/) const override {
-        if (!data_ || channels_ < 4) {
+        if (!data_) {
             return 1.0f;
         }
 
@@ -169,7 +237,13 @@ public:
         int y = static_cast<int>(v * (height_ - 1));
 
         const std::size_t idx = (static_cast<std::size_t>(y) * width_ + x) * channels_;
-        return data_[idx + 3] / 255.0f;
+        if (channels_ >= 4) {
+            return data_[idx + 3] / 255.0f;
+        }
+        if (channels_ == 2) {
+            return data_[idx + 1] / 255.0f;
+        }
+        return 1.0f;
     }
 
     bool valid() const { return data_ != nullptr; }
@@ -180,23 +254,48 @@ private:
     Color get_pixel(int x, int y) const {
         const std::size_t idx = (static_cast<std::size_t>(y) * width_ + x) * channels_;
 
-        float r, g, b;
-        if (channels_ == 1 || channels_ == 2) {
-            float gray = std::pow(data_[idx + 0] / 255.0f, 2.2f);
-            r = g = b = gray;
-        } else {
-            r = std::pow(data_[idx + 0] / 255.0f, 2.2f);
-            g = std::pow(data_[idx + 1] / 255.0f, 2.2f);
-            b = std::pow(data_[idx + 2] / 255.0f, 2.2f);
+        if (!data_ || width_ <= 0 || height_ <= 0 || channels_ <= 0) {
+            return Color(1.0f, 0.0f, 1.0f);
         }
 
+        auto decode = [&](int c, bool apply_srgb) -> float {
+            if (c < 0 || c >= channels_) {
+                return 0.0f;
+            }
+            const float v = data_[idx + c] / 255.0f;
+            if (apply_srgb) {
+                return std::pow(v, 2.2f);
+            }
+            return v;
+        };
+
+        if (channel_ >= 0) {
+            const bool apply_srgb = (color_space_ == ColorSpace::sRGB) && (channel_ != 3);
+            const float v = decode(channel_, apply_srgb);
+            return Color(v, v, v);
+        }
+
+        if (channels_ == 1 || channels_ == 2) {
+            const bool apply_srgb = (color_space_ == ColorSpace::sRGB);
+            const float gray = decode(0, apply_srgb);
+            return Color(gray, gray, gray);
+        }
+
+        const bool apply_srgb = (color_space_ == ColorSpace::sRGB);
+        const float r = decode(0, apply_srgb);
+        const float g = decode(1, apply_srgb);
+        const float b = decode(2, apply_srgb);
         return Color(r, g, b);
     }
 
+    std::vector<unsigned char> owned_data_;
     unsigned char* data_;
     int width_;
     int height_;
     int channels_;
+    ColorSpace color_space_;
+    int channel_;
+    bool owns_memory_;
 };
 
 class NormalMapTexture {
@@ -271,3 +370,43 @@ private:
 };
 
 using NormalMapPtr = std::shared_ptr<NormalMapTexture>;
+
+class ColorFactorTexture : public Texture {
+public:
+    ColorFactorTexture(const TexturePtr& base, const Color& color_factor, float alpha_factor = 1.0f)
+        : base_(base), color_factor_(color_factor), alpha_factor_(alpha_factor) {}
+
+    Color value(float u, float v, const Vec3& p) const override {
+        Color c = base_ ? base_->value(u, v, p) : Color(1.0f);
+        return Color(c.x * color_factor_.x, c.y * color_factor_.y, c.z * color_factor_.z);
+    }
+
+    float alpha(float u, float v, const Vec3& p) const override {
+        const float a = base_ ? base_->alpha(u, v, p) : 1.0f;
+        return clamp_float(a * alpha_factor_, 0.0f, 1.0f);
+    }
+
+private:
+    TexturePtr base_;
+    Color color_factor_;
+    float alpha_factor_ = 1.0f;
+};
+
+class AlphaCutoffTexture : public Texture {
+public:
+    AlphaCutoffTexture(const TexturePtr& base, float cutoff)
+        : base_(base), cutoff_(cutoff) {}
+
+    Color value(float u, float v, const Vec3& p) const override {
+        return base_ ? base_->value(u, v, p) : Color(1.0f);
+    }
+
+    float alpha(float u, float v, const Vec3& p) const override {
+        const float a = base_ ? base_->alpha(u, v, p) : 1.0f;
+        return (a >= cutoff_) ? 1.0f : 0.0f;
+    }
+
+private:
+    TexturePtr base_;
+    float cutoff_ = 0.5f;
+};
