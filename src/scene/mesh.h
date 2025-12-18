@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <algorithm>
+#include <cfloat>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -379,6 +381,198 @@ private:
         return 2;
     }
 
+    static float surface_area(const AABB& b) {
+        const float dx = std::max(0.0f, b.max.x - b.min.x);
+        const float dy = std::max(0.0f, b.max.y - b.min.y);
+        const float dz = std::max(0.0f, b.max.z - b.min.z);
+        return 2.0f * (dx * dy + dy * dz + dz * dx);
+    }
+
+    struct SAHSplit {
+        int axis = -1;
+        int bin_split = -1;
+    };
+
+    SAHSplit find_sah_split(std::uint32_t start, std::uint32_t end) const {
+        constexpr int kBins = 16;
+        const std::uint32_t n = end - start;
+        if (n < 2) {
+            return {};
+        }
+
+        AABB parent_bounds;
+        bool first_box = true;
+        for (std::uint32_t i = start; i < end; ++i) {
+            const std::uint32_t tri = prim_indices_[i];
+            const AABB& b = tri_boxes_[tri];
+            if (first_box) {
+                parent_bounds = b;
+                first_box = false;
+            } else {
+                parent_bounds = surrounding_box(parent_bounds, b);
+            }
+        }
+
+        const float parent_area = surface_area(parent_bounds);
+        if (!(parent_area > 0.0f)) {
+            return {};
+        }
+
+        SAHSplit best;
+        float best_cost = FLT_MAX;
+
+        for (int axis = 0; axis < 3; ++axis) {
+            float cmin = FLT_MAX;
+            float cmax = -FLT_MAX;
+
+            for (std::uint32_t i = start; i < end; ++i) {
+                const std::uint32_t tri = prim_indices_[i];
+                const Vec3& c = tri_centroids_[tri];
+                const float v = (axis == 0) ? c.x : (axis == 1) ? c.y : c.z;
+                cmin = std::min(cmin, v);
+                cmax = std::max(cmax, v);
+            }
+
+            const float extent = cmax - cmin;
+            if (!(extent > 1e-6f)) {
+                continue;
+            }
+
+            struct Bin {
+                AABB bounds;
+                int count = 0;
+                bool init = false;
+            };
+            std::array<Bin, kBins> bins;
+
+            auto bin_index = [&](float c) {
+                const float t = (c - cmin) / extent;
+                int idx = static_cast<int>(t * static_cast<float>(kBins));
+                if (idx < 0) idx = 0;
+                if (idx >= kBins) idx = kBins - 1;
+                return idx;
+            };
+
+            for (std::uint32_t i = start; i < end; ++i) {
+                const std::uint32_t tri = prim_indices_[i];
+                const Vec3& c = tri_centroids_[tri];
+                const float v = (axis == 0) ? c.x : (axis == 1) ? c.y : c.z;
+                const int idx = bin_index(v);
+                Bin& bin = bins[static_cast<std::size_t>(idx)];
+                const AABB& b = tri_boxes_[tri];
+                if (!bin.init) {
+                    bin.bounds = b;
+                    bin.init = true;
+                } else {
+                    bin.bounds = surrounding_box(bin.bounds, b);
+                }
+                bin.count += 1;
+            }
+
+            std::array<AABB, kBins> prefix_bounds;
+            std::array<int, kBins> prefix_count;
+            std::array<AABB, kBins> suffix_bounds;
+            std::array<int, kBins> suffix_count;
+
+            bool pref_init = false;
+            int cnt = 0;
+            AABB bnd;
+            for (int i = 0; i < kBins; ++i) {
+                const Bin& bin = bins[static_cast<std::size_t>(i)];
+                if (bin.count > 0) {
+                    if (!pref_init) {
+                        bnd = bin.bounds;
+                        pref_init = true;
+                    } else {
+                        bnd = surrounding_box(bnd, bin.bounds);
+                    }
+                    cnt += bin.count;
+                }
+                prefix_bounds[static_cast<std::size_t>(i)] = bnd;
+                prefix_count[static_cast<std::size_t>(i)] = cnt;
+            }
+
+            bool suf_init = false;
+            cnt = 0;
+            for (int i = kBins - 1; i >= 0; --i) {
+                const Bin& bin = bins[static_cast<std::size_t>(i)];
+                if (bin.count > 0) {
+                    if (!suf_init) {
+                        bnd = bin.bounds;
+                        suf_init = true;
+                    } else {
+                        bnd = surrounding_box(bnd, bin.bounds);
+                    }
+                    cnt += bin.count;
+                }
+                suffix_bounds[static_cast<std::size_t>(i)] = bnd;
+                suffix_count[static_cast<std::size_t>(i)] = cnt;
+            }
+
+            for (int split = 0; split < kBins - 1; ++split) {
+                const int left_count = prefix_count[static_cast<std::size_t>(split)];
+                const int right_count = suffix_count[static_cast<std::size_t>(split + 1)];
+                if (left_count == 0 || right_count == 0) {
+                    continue;
+                }
+
+                const float left_area = surface_area(prefix_bounds[static_cast<std::size_t>(split)]);
+                const float right_area = surface_area(suffix_bounds[static_cast<std::size_t>(split + 1)]);
+                const float cost =
+                    1.0f +
+                    (left_area / parent_area) * static_cast<float>(left_count) +
+                    (right_area / parent_area) * static_cast<float>(right_count);
+
+                if (cost < best_cost) {
+                    best_cost = cost;
+                    best.axis = axis;
+                    best.bin_split = split;
+                }
+            }
+        }
+
+        return best;
+    }
+
+    std::uint32_t partition_by_sah_split(std::uint32_t start, std::uint32_t end, const SAHSplit& split) {
+        constexpr int kBins = 16;
+        if (split.axis < 0) {
+            return start;
+        }
+
+        float cmin = FLT_MAX;
+        float cmax = -FLT_MAX;
+        for (std::uint32_t i = start; i < end; ++i) {
+            const std::uint32_t tri = prim_indices_[i];
+            const Vec3& c = tri_centroids_[tri];
+            const float v = (split.axis == 0) ? c.x : (split.axis == 1) ? c.y : c.z;
+            cmin = std::min(cmin, v);
+            cmax = std::max(cmax, v);
+        }
+
+        const float extent = cmax - cmin;
+        if (!(extent > 1e-6f)) {
+            return start;
+        }
+
+        auto bin_index = [&](std::uint32_t tri) {
+            const Vec3& c = tri_centroids_[tri];
+            const float v = (split.axis == 0) ? c.x : (split.axis == 1) ? c.y : c.z;
+            const float t = (v - cmin) / extent;
+            int idx = static_cast<int>(t * static_cast<float>(kBins));
+            if (idx < 0) idx = 0;
+            if (idx >= kBins) idx = kBins - 1;
+            return idx;
+        };
+
+        auto mid_it = std::partition(
+            prim_indices_.begin() + static_cast<std::ptrdiff_t>(start),
+            prim_indices_.begin() + static_cast<std::ptrdiff_t>(end),
+            [&](std::uint32_t tri) { return bin_index(tri) <= split.bin_split; });
+
+        return static_cast<std::uint32_t>(mid_it - prim_indices_.begin());
+    }
+
     void build_bvh() {
         if (prim_indices_.empty()) {
             root_ = -1;
@@ -418,25 +612,33 @@ private:
             return node_index;
         }
 
-        const int axis = choose_split_axis(range_box);
-        const std::uint32_t mid = start + span / 2;
+        const SAHSplit split = find_sah_split(start, end);
+        std::uint32_t mid = start;
+        if (split.axis >= 0) {
+            mid = partition_by_sah_split(start, end, split);
+        }
 
-        auto centroid_less = [&](std::uint32_t a, std::uint32_t b) {
-            const Vec3& ca = tri_centroids_[a];
-            const Vec3& cb = tri_centroids_[b];
-            if (axis == 0) {
-                return ca.x < cb.x;
-            } else if (axis == 1) {
-                return ca.y < cb.y;
-            }
-            return ca.z < cb.z;
-        };
+        if (mid == start || mid == end) {
+            const int axis = choose_split_axis(range_box);
+            mid = start + span / 2;
 
-        std::nth_element(
-            prim_indices_.begin() + static_cast<std::ptrdiff_t>(start),
-            prim_indices_.begin() + static_cast<std::ptrdiff_t>(mid),
-            prim_indices_.begin() + static_cast<std::ptrdiff_t>(end),
-            centroid_less);
+            auto centroid_less = [&](std::uint32_t a, std::uint32_t b) {
+                const Vec3& ca = tri_centroids_[a];
+                const Vec3& cb = tri_centroids_[b];
+                if (axis == 0) {
+                    return ca.x < cb.x;
+                } else if (axis == 1) {
+                    return ca.y < cb.y;
+                }
+                return ca.z < cb.z;
+            };
+
+            std::nth_element(
+                prim_indices_.begin() + static_cast<std::ptrdiff_t>(start),
+                prim_indices_.begin() + static_cast<std::ptrdiff_t>(mid),
+                prim_indices_.begin() + static_cast<std::ptrdiff_t>(end),
+                centroid_less);
+        }
 
         const int left = build_node(start, mid);
         const int right = build_node(mid, end);
