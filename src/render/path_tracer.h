@@ -314,28 +314,47 @@ private:
             return 0.0f;
         }
 
-        const float cos_light = std::fabs(dot(light_hit.normal, -wi));
-        if (cos_light <= 0.0f) {
-            return 0.0f;
-        }
-
-        float area = 0.0f;
         if (const auto* quad = dynamic_cast<const Quad*>(light_hit.object)) {
-            area = quad->area();
+            const float cos_light = std::fabs(dot(light_hit.normal, -wi));
+            if (cos_light <= 0.0f) {
+                return 0.0f;
+            }
+
+            const float area = quad->area();
+            if (area <= 0.0f) {
+                return 0.0f;
+            }
+
+            return dist_squared / (cos_light * area);
         } else if (const auto* sphere = dynamic_cast<const Sphere*>(light_hit.object)) {
+            const float cos_light = std::fabs(dot(light_hit.normal, -wi));
+            if (cos_light <= 0.0f) {
+                return 0.0f;
+            }
+
             const float r = sphere->radius();
-            area = 4.0f * kPi * r * r;
+            const float area = 4.0f * kPi * r * r;
+            if (area <= 0.0f) {
+                return 0.0f;
+            }
+
+            return dist_squared / (cos_light * area);
         } else if (const auto* mesh = dynamic_cast<const Mesh*>(light_hit.object)) {
-            area = mesh->area();
+            const float pdf_area = mesh->pdf_area(light_hit);
+            if (pdf_area <= 0.0f) {
+                return 0.0f;
+            }
+
+            const Vec3 gn = mesh->geometric_normal(light_hit.primitive_id);
+            const float cos_light = std::fabs(dot(gn, -wi));
+            if (cos_light <= 0.0f) {
+                return 0.0f;
+            }
+
+            return pdf_area * dist_squared / cos_light;
         } else {
             return 0.0f;
         }
-
-        if (area <= 0.0f) {
-            return 0.0f;
-        }
-
-        return dist_squared / (cos_light * area);
     }
 
     Color bsdf_sample_emitter(const Scene& scene,

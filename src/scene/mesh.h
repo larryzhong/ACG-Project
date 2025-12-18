@@ -102,6 +102,7 @@ public:
 
         rec.t = closest_so_far;
         rec.point = r.at(rec.t);
+        rec.primitive_id = best_tri;
 
         Vec3 geom_normal = cross(p1 - p0, p2 - p0);
         if (geom_normal.length_squared() > 1e-20f) {
@@ -801,13 +802,55 @@ public:
         return total_area_;
     }
 
+    float pdf_area(const HitRecord& hit) const {
+        if (tri_intensity_.empty() || total_light_weight_ <= 0.0f) {
+            return 0.0f;
+        }
+        const std::size_t tri = static_cast<std::size_t>(hit.primitive_id);
+        if (tri >= tri_intensity_.size()) {
+            return 0.0f;
+        }
+        const float intensity = tri_intensity_[tri];
+        if (!(intensity > 0.0f)) {
+            return 0.0f;
+        }
+        return intensity / total_light_weight_;
+    }
+
+    Vec3 geometric_normal(std::uint32_t tri) const {
+        if (!data_) {
+            return Vec3(0.0f, 1.0f, 0.0f);
+        }
+
+        Vec3 p0, p1, p2;
+        Vec2 uv0, uv1, uv2;
+        if (!data_->triangle_vertices(tri, p0, p1, p2, uv0, uv1, uv2)) {
+            return Vec3(0.0f, 1.0f, 0.0f);
+        }
+
+        Vec3 n = cross(p1 - p0, p2 - p0);
+        if (n.length_squared() > 1e-20f) {
+            n = normalize(n);
+        } else {
+            n = Vec3(0.0f, 1.0f, 0.0f);
+        }
+
+        Vec3 wn = transform_.apply_normal(n);
+        if (wn.length_squared() > 1e-20f) {
+            wn = normalize(wn);
+        } else {
+            wn = n;
+        }
+        return wn;
+    }
+
     bool sample_surface(RNG& rng,
                         Vec3& out_pos,
                         Vec3& out_normal,
                         float& out_u,
                         float& out_v,
                         float& out_pdf_area) const {
-        if (!data_ || total_area_ <= 0.0f || tri_cdf_.empty()) {
+        if (!data_ || total_light_weight_ <= 0.0f || tri_cdf_.empty() || tri_intensity_.empty()) {
             return false;
         }
 
@@ -847,20 +890,30 @@ public:
         out_normal = gn;
         out_u = local_uv.x;
         out_v = local_uv.y;
-        out_pdf_area = 1.0f / total_area_;
+        const float intensity = tri_intensity_[tri];
+        out_pdf_area = intensity / total_light_weight_;
         return true;
     }
 
 private:
     void build_light_distribution() {
+        constexpr float kMinIntensity = 1e-6f;
+
+        auto luminance = [](const Color& c) {
+            return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
+        };
+
         total_area_ = 0.0f;
+        total_light_weight_ = 0.0f;
         tri_cdf_.clear();
+        tri_intensity_.clear();
         if (!data_) {
             return;
         }
 
         const std::size_t tri_count = data_->triangle_count();
         tri_cdf_.assign(tri_count + 1, 0.0f);
+        tri_intensity_.assign(tri_count, 0.0f);
         if (tri_count == 0) {
             return;
         }
@@ -869,24 +922,70 @@ private:
             Vec3 p0, p1, p2;
             Vec2 uv0, uv1, uv2;
             if (!data_->triangle_vertices(static_cast<std::uint32_t>(tri), p0, p1, p2, uv0, uv1, uv2)) {
-                tri_cdf_[tri + 1] = total_area_;
+                tri_cdf_[tri + 1] = total_light_weight_;
                 continue;
             }
 
             const Vec3 w0 = transform_.apply_point(p0);
             const Vec3 w1 = transform_.apply_point(p1);
             const Vec3 w2 = transform_.apply_point(p2);
-            const float a = 0.5f * cross(w1 - w0, w2 - w0).length();
-            total_area_ += std::max(0.0f, a);
-            tri_cdf_[tri + 1] = total_area_;
+
+            const float area = 0.5f * cross(w1 - w0, w2 - w0).length();
+            const float safe_area = std::max(0.0f, area);
+            total_area_ += safe_area;
+
+            float intensity = kMinIntensity;
+            if (material_ && safe_area > 0.0f) {
+                Vec3 gn = cross(w1 - w0, w2 - w0);
+                if (gn.length_squared() > 1e-20f) {
+                    gn = normalize(gn);
+                } else {
+                    gn = Vec3(0.0f, 1.0f, 0.0f);
+                }
+
+                auto sample_intensity = [&](const Vec3& p, const Vec2& uv) {
+                    HitRecord h;
+                    h.point = p;
+                    h.u = uv.x;
+                    h.v = uv.y;
+                    h.front_face = true;
+                    h.normal = gn;
+                    h.tangent = Vec3(1.0f, 0.0f, 0.0f);
+                    h.material = material_.get();
+                    h.object = this;
+
+                    const Color Le = material_->emitted(h);
+                    float lum = luminance(Le);
+                    if (!std::isfinite(lum) || lum < 0.0f) {
+                        lum = 0.0f;
+                    }
+                    return lum;
+                };
+
+                const Vec3 centroid_p = (w0 + w1 + w2) / 3.0f;
+                const Vec2 centroid_uv = (uv0 + uv1 + uv2) / 3.0f;
+
+                const float lum0 = sample_intensity(w0, uv0);
+                const float lum1 = sample_intensity(w1, uv1);
+                const float lum2 = sample_intensity(w2, uv2);
+                const float lumc = sample_intensity(centroid_p, centroid_uv);
+
+                const float avg = 0.25f * (lum0 + lum1 + lum2 + lumc);
+                intensity = std::max(kMinIntensity, avg);
+            }
+
+            tri_intensity_[tri] = intensity;
+            total_light_weight_ += safe_area * intensity;
+            tri_cdf_[tri + 1] = total_light_weight_;
         }
 
-        if (total_area_ <= 0.0f) {
+        if (total_area_ <= 0.0f || total_light_weight_ <= 0.0f) {
             tri_cdf_.clear();
+            tri_intensity_.clear();
             return;
         }
 
-        const float inv = 1.0f / total_area_;
+        const float inv = 1.0f / total_light_weight_;
         for (std::size_t i = 1; i < tri_cdf_.size(); ++i) {
             tri_cdf_[i] *= inv;
         }
@@ -897,5 +996,7 @@ private:
     AABB world_bounds_;
     MaterialPtr material_;
     float total_area_ = 0.0f;
+    float total_light_weight_ = 0.0f;
     std::vector<float> tri_cdf_;
+    std::vector<float> tri_intensity_;
 };

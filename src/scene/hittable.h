@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 
 #include "core/ray.h"
@@ -22,6 +23,7 @@ struct HitRecord {
     Vec3 dpdu = Vec3(0.0f);
     Vec3 dpdv = Vec3(0.0f);
     float ray_footprint = 0.0f; // world-space radius at hit, for texture LOD
+    std::uint32_t primitive_id = 0xffffffffu;
 
     void set_face_normal(const Ray& r, const Vec3& outward_normal) {
         front_face = dot(r.direction, outward_normal) < 0.0f;
