@@ -100,17 +100,20 @@ public:
           channels_(0),
           color_space_(ColorSpace::sRGB),
           channel_(-1),
+          flip_v_(true),
           owns_memory_(false) {}
 
     explicit ImageTexture(const std::string& filename,
                           ColorSpace color_space = ColorSpace::sRGB,
-                          int channel = -1)
+                          int channel = -1,
+                          bool flip_v = true)
         : data_(nullptr),
           width_(0),
           height_(0),
           channels_(0),
           color_space_(color_space),
           channel_(channel),
+          flip_v_(flip_v),
           owns_memory_(false) {
         data_ = stbi_load(filename.c_str(), &width_, &height_, &channels_, 0);
         if (!data_) {
@@ -127,7 +130,8 @@ public:
                  int height,
                  int channels,
                  ColorSpace color_space = ColorSpace::sRGB,
-                 int channel = -1)
+                 int channel = -1,
+                 bool flip_v = true)
         : owned_data_(std::move(bytes)),
           data_(nullptr),
           width_(width),
@@ -135,6 +139,7 @@ public:
           channels_(channels),
           color_space_(color_space),
           channel_(channel),
+          flip_v_(flip_v),
           owns_memory_(true) {
         if (width_ <= 0 || height_ <= 0 || channels_ <= 0) {
             width_ = height_ = channels_ = 0;
@@ -172,6 +177,7 @@ public:
           channels_(other.channels_),
           color_space_(other.color_space_),
           channel_(other.channel_),
+          flip_v_(other.flip_v_),
           mip_levels_(std::move(other.mip_levels_)),
           owns_memory_(other.owns_memory_) {
         other.data_ = nullptr;
@@ -194,6 +200,7 @@ public:
             channels_ = other.channels_;
             color_space_ = other.color_space_;
             channel_ = other.channel_;
+            flip_v_ = other.flip_v_;
             mip_levels_ = std::move(other.mip_levels_);
             owns_memory_ = other.owns_memory_;
             other.data_ = nullptr;
@@ -459,7 +466,7 @@ private:
         }
 
         u = clamp_float(u, 0.0f, 1.0f);
-        v = 1.0f - clamp_float(v, 0.0f, 1.0f);
+        v = flip_v_ ? (1.0f - clamp_float(v, 0.0f, 1.0f)) : clamp_float(v, 0.0f, 1.0f);
 
         const float fx = u * static_cast<float>(level.width - 1);
         const float fy = v * static_cast<float>(level.height - 1);
@@ -488,7 +495,7 @@ private:
         }
 
         u = clamp_float(u, 0.0f, 1.0f);
-        v = 1.0f - clamp_float(v, 0.0f, 1.0f);
+        v = flip_v_ ? (1.0f - clamp_float(v, 0.0f, 1.0f)) : clamp_float(v, 0.0f, 1.0f);
 
         const float fx = u * static_cast<float>(level.width - 1);
         const float fy = v * static_cast<float>(level.height - 1);
@@ -586,6 +593,7 @@ private:
     int channels_;
     ColorSpace color_space_;
     int channel_;
+    bool flip_v_;
     std::vector<MipLevel> mip_levels_;
     bool owns_memory_;
 };
@@ -598,11 +606,13 @@ public:
           width_(0),
           height_(0),
           channels_(0),
+          flip_v_(true),
           owns_memory_(false) {}
 
-    explicit NormalMapTexture(const std::string& filename) {
+    explicit NormalMapTexture(const std::string& filename, bool flip_v = true) {
         int channels_in_file = 0;
         data_ = stbi_load(filename.c_str(), &width_, &height_, &channels_in_file, 3);
+        flip_v_ = flip_v;
         owns_memory_ = false;
         if (!data_) {
             std::cerr << "ERROR: Could not load normal map: " << filename << "\n";
@@ -616,12 +626,14 @@ public:
     NormalMapTexture(std::vector<unsigned char> bytes,
                      int width,
                      int height,
-                     int channels)
+                     int channels,
+                     bool flip_v = true)
         : owned_data_(std::move(bytes)),
           data_(nullptr),
           width_(width),
           height_(height),
           channels_(channels),
+          flip_v_(flip_v),
           owns_memory_(true) {
         if (width_ <= 0 || height_ <= 0 || channels_ <= 0) {
             width_ = height_ = channels_ = 0;
@@ -652,6 +664,7 @@ public:
           width_(other.width_),
           height_(other.height_),
           channels_(other.channels_),
+          flip_v_(other.flip_v_),
           owns_memory_(other.owns_memory_) {
         other.data_ = nullptr;
         other.width_ = other.height_ = other.channels_ = 0;
@@ -664,7 +677,7 @@ public:
         }
 
         u = clamp_float(u, 0.0f, 1.0f);
-        v = 1.0f - clamp_float(v, 0.0f, 1.0f);
+        v = flip_v_ ? (1.0f - clamp_float(v, 0.0f, 1.0f)) : clamp_float(v, 0.0f, 1.0f);
 
         int x = static_cast<int>(u * (width_ - 1));
         int y = static_cast<int>(v * (height_ - 1));
@@ -680,11 +693,12 @@ public:
     }
 
     static Vec3 apply_normal_map(const Vec3& tangent_normal,
-                                  const Vec3& normal,
-                                  const Vec3& tangent) {
+                                 const Vec3& normal,
+                                 const Vec3& tangent,
+                                 float tangent_sign = 1.0f) {
         Vec3 N = normalize(normal);
         Vec3 T = normalize(tangent - dot(tangent, N) * N);
-        Vec3 B = cross(N, T);
+        Vec3 B = tangent_sign * cross(N, T);
 
         return normalize(
             tangent_normal.x * T +
@@ -701,6 +715,7 @@ private:
     int width_;
     int height_;
     int channels_;
+    bool flip_v_;
     bool owns_memory_;
 };
 
@@ -744,4 +759,22 @@ public:
 private:
     TexturePtr base_;
     float cutoff_ = 0.5f;
+};
+
+class ForceAlphaTexture : public Texture {
+public:
+    ForceAlphaTexture(const TexturePtr& base, float alpha)
+        : base_(base), alpha_(clamp_float(alpha, 0.0f, 1.0f)) {}
+
+    Color value(const HitRecord& hit) const override {
+        return base_ ? base_->value(hit) : Color(1.0f);
+    }
+
+    float alpha(const HitRecord& /*hit*/) const override {
+        return alpha_;
+    }
+
+private:
+    TexturePtr base_;
+    float alpha_ = 1.0f;
 };

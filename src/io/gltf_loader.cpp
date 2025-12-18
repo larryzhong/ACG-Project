@@ -69,17 +69,20 @@ static NormalMapPtr load_normal_map(const tinygltf::Model& model,
     const tinygltf::Image& image = model.images[tex.source];
 
     NormalMapPtr result;
+    // glTF UV origin is bottom-left (OpenGL convention), while decoded image rows are top-left.
+    // Our texture sampling expects to flip V for images, so keep flip enabled here.
+    constexpr bool kFlipV = true;
     const bool is_data_uri =
         image.uri.size() >= 5 && image.uri.rfind("data:", 0) == 0;
     if (!image.image.empty() && image.width > 0 && image.height > 0) {
         const int channels = (image.component > 0) ? image.component : 4;
-        result = std::make_shared<NormalMapTexture>(image.image, image.width, image.height, channels);
+        result = std::make_shared<NormalMapTexture>(image.image, image.width, image.height, channels, kFlipV);
     } else if (is_data_uri) {
         if (err) *err += "Data URI image was not decoded.\n";
         result = nullptr;
     } else if (!image.uri.empty()) {
         std::filesystem::path p = base_dir / std::filesystem::path(image.uri);
-        result = std::make_shared<NormalMapTexture>(p.string());
+        result = std::make_shared<NormalMapTexture>(p.string(), kFlipV);
     } else {
         if (err) *err += "Unsupported image source.\n";
         result = nullptr;
@@ -295,6 +298,77 @@ static bool read_accessor_vec2(const tinygltf::Model& model,
     return true;
 }
 
+static bool read_accessor_vec4_tangents(const tinygltf::Model& model,
+                                        int accessor_index,
+                                        std::vector<Vec3>& out_tangent,
+                                        std::vector<float>& out_sign,
+                                        std::string* err) {
+    out_tangent.clear();
+    out_sign.clear();
+
+    if (accessor_index < 0 || accessor_index >= static_cast<int>(model.accessors.size())) {
+        if (err) *err += "Missing accessor.\n";
+        return false;
+    }
+
+    const tinygltf::Accessor& accessor = model.accessors[accessor_index];
+    if (accessor.sparse.isSparse) {
+        if (err) *err += "Sparse accessors are not supported.\n";
+        return false;
+    }
+    if (accessor.type != TINYGLTF_TYPE_VEC4) {
+        if (err) *err += "Expected VEC4 accessor.\n";
+        return false;
+    }
+    if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) {
+        if (err) *err += "Expected FLOAT accessor.\n";
+        return false;
+    }
+
+    if (accessor.bufferView < 0 || accessor.bufferView >= static_cast<int>(model.bufferViews.size())) {
+        if (err) *err += "Invalid bufferView index.\n";
+        return false;
+    }
+
+    const tinygltf::BufferView& view = model.bufferViews[accessor.bufferView];
+    if (view.buffer < 0 || view.buffer >= static_cast<int>(model.buffers.size())) {
+        if (err) *err += "Invalid buffer index.\n";
+        return false;
+    }
+
+    const tinygltf::Buffer& buffer = model.buffers[view.buffer];
+    const int stride_i = accessor.ByteStride(view);
+    if (stride_i < 0) {
+        if (err) *err += "Invalid accessor stride.\n";
+        return false;
+    }
+    const std::size_t elem_stride = static_cast<std::size_t>(stride_i);
+    const std::size_t elem_size = sizeof(float) * 4;
+
+    const std::size_t base_offset = static_cast<std::size_t>(view.byteOffset + accessor.byteOffset);
+    const std::size_t required =
+        accessor.count == 0 ? 0 : ((accessor.count - 1) * elem_stride + elem_size);
+    if (base_offset < static_cast<std::size_t>(view.byteOffset) ||
+        base_offset + required > buffer.data.size() ||
+        (view.byteLength > 0 && base_offset + required > static_cast<std::size_t>(view.byteOffset + view.byteLength))) {
+        if (err) *err += "Accessor out of bounds.\n";
+        return false;
+    }
+
+    out_tangent.resize(accessor.count);
+    out_sign.resize(accessor.count, 1.0f);
+
+    for (std::size_t i = 0; i < accessor.count; ++i) {
+        float v[4] = {0, 0, 0, 1};
+        const unsigned char* ptr = buffer.data.data() + base_offset + i * elem_stride;
+        std::memcpy(v, ptr, sizeof(float) * 4);
+        out_tangent[i] = Vec3(v[0], v[1], v[2]);
+        out_sign[i] = (v[3] < 0.0f) ? -1.0f : 1.0f;
+    }
+
+    return true;
+}
+
 static bool read_accessor_indices(const tinygltf::Model& model,
                                   int accessor_index,
                                   std::vector<std::uint32_t>& out,
@@ -438,18 +512,21 @@ static TexturePtr load_texture(const tinygltf::Model& model,
     const tinygltf::Image& image = model.images[tex.source];
 
     TexturePtr result;
+    // glTF UV origin is bottom-left (OpenGL convention), while decoded image rows are top-left.
+    // Our texture sampling expects to flip V for images, so keep flip enabled here.
+    constexpr bool kFlipV = true;
     const bool is_data_uri =
         image.uri.size() >= 5 && image.uri.rfind("data:", 0) == 0;
     if (!image.image.empty() && image.width > 0 && image.height > 0) {
         const int channels = (image.component > 0) ? image.component : 4;
         result = std::make_shared<ImageTexture>(
-            image.image, image.width, image.height, channels, color_space, channel);
+            image.image, image.width, image.height, channels, color_space, channel, kFlipV);
     } else if (is_data_uri) {
         if (err) *err += "Data URI image was not decoded.\n";
         result = nullptr;
     } else if (!image.uri.empty()) {
         std::filesystem::path p = base_dir / std::filesystem::path(image.uri);
-        result = std::make_shared<ImageTexture>(p.string(), color_space, channel);
+        result = std::make_shared<ImageTexture>(p.string(), color_space, channel, kFlipV);
     } else {
         if (err) *err += "Unsupported image source.\n";
         result = nullptr;
@@ -510,6 +587,9 @@ static MaterialBuildResult build_material(const tinygltf::Model& model,
         const float cutoff =
             (mat.alphaCutoff > 0.0) ? static_cast<float>(mat.alphaCutoff) : 0.5f;
         base_tex = std::make_shared<AlphaCutoffTexture>(base_tex, cutoff);
+    } else if (alpha_mode == "OPAQUE") {
+        // glTF: ignore baseColor alpha for opaque materials (both factor and texture channel).
+        base_tex = std::make_shared<ForceAlphaTexture>(base_tex, 1.0f);
     }
 
     Color emissive_factor(0.0f);
@@ -563,6 +643,22 @@ static MaterialBuildResult build_material(const tinygltf::Model& model,
                                     err);
     }
 
+    TexturePtr occlusion_tex;
+    float occlusion_strength = 1.0f;
+    if (mat.occlusionTexture.index >= 0) {
+        // glTF occlusion is packed in R.
+        occlusion_tex = load_texture(model,
+                                     mat.occlusionTexture.index,
+                                     base_dir,
+                                     ImageTexture::ColorSpace::Linear,
+                                     0,
+                                     texture_cache,
+                                     err);
+        if (mat.occlusionTexture.strength > 0.0) {
+            occlusion_strength = static_cast<float>(mat.occlusionTexture.strength);
+        }
+    }
+
     NormalMapPtr normal_map;
     float normal_strength = 1.0f;
     if (mat.normalTexture.index >= 0) {
@@ -582,7 +678,9 @@ static MaterialBuildResult build_material(const tinygltf::Model& model,
                                                                  roughness_factor,
                                                                  roughness_tex,
                                                                  normal_map,
-                                                                 normal_strength);
+                                                                 normal_strength,
+                                                                 occlusion_tex,
+                                                                 occlusion_strength);
 
     if (emissive_tex) {
         out.material = std::make_shared<EmissiveMaterial>(base_material, emissive_tex, mat.doubleSided);
@@ -687,6 +785,21 @@ static MeshDataPtr build_mesh_data(const tinygltf::Model& model,
         }
     }
 
+    std::vector<Vec3> tangents;
+    std::vector<float> tangent_signs;
+    if (auto it_t = prim.attributes.find("TANGENT"); it_t != prim.attributes.end()) {
+        if (!read_accessor_vec4_tangents(model, it_t->second, tangents, tangent_signs, err)) {
+            tangents.clear();
+            tangent_signs.clear();
+        }
+    }
+
+    if (!tangents.empty() && tangents.size() != positions.size()) {
+        if (err) *err += "TANGENT attribute size mismatch.\n";
+        tangents.clear();
+        tangent_signs.clear();
+    }
+
     std::vector<std::uint32_t> indices;
     if (prim.indices >= 0) {
         if (!read_accessor_indices(model, prim.indices, indices, err)) {
@@ -715,7 +828,9 @@ static MeshDataPtr build_mesh_data(const tinygltf::Model& model,
         std::move(positions),
         std::move(normals),
         std::move(uvs),
-        std::move(indices));
+        std::move(indices),
+        std::move(tangents),
+        std::move(tangent_signs));
 }
 
 static void traverse_node(const tinygltf::Model& model,

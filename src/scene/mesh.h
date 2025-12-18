@@ -23,11 +23,15 @@ public:
     MeshData(std::vector<Vec3> positions,
              std::vector<Vec3> normals,
              std::vector<Vec2> uvs,
-             std::vector<std::uint32_t> indices)
+             std::vector<std::uint32_t> indices,
+             std::vector<Vec3> tangents = {},
+             std::vector<float> tangent_signs = {})
         : positions_(std::move(positions)),
           normals_(std::move(normals)),
           uvs_(std::move(uvs)),
-          indices_(std::move(indices)) {
+          indices_(std::move(indices)),
+          tangents_(std::move(tangents)),
+          tangent_signs_(std::move(tangent_signs)) {
         build_internal();
     }
 
@@ -133,6 +137,13 @@ public:
             tangent = normalize(p1 - p0);
         }
 
+        float tangent_sign = 1.0f;
+        if (tangent_signs_.size() == positions_.size()) {
+            tangent_sign = tangent_signs_[i0] * w0 + tangent_signs_[i1] * w1 + tangent_signs_[i2] * w2;
+            tangent_sign = (tangent_sign < 0.0f) ? -1.0f : 1.0f;
+        }
+        rec.tangent_sign = tangent_sign;
+
         rec.front_face = dot(r.direction, geom_normal) < 0.0f;
         rec.normal = rec.front_face ? shading_normal : -shading_normal;
 
@@ -235,7 +246,20 @@ private:
             uvs_.assign(positions_.size(), Vec2::zero());
         }
 
-        compute_vertex_tangents();
+        if (tangents_.size() != positions_.size()) {
+            tangents_.clear();
+        }
+        if (tangent_signs_.size() != positions_.size()) {
+            if (tangents_.size() == positions_.size()) {
+                tangent_signs_.assign(positions_.size(), 1.0f);
+            } else {
+                tangent_signs_.clear();
+            }
+        }
+
+        if (tangents_.size() != positions_.size()) {
+            compute_vertex_tangents();
+        }
         build_triangle_bounds();
         build_bvh();
     }
@@ -270,6 +294,8 @@ private:
 
     void compute_vertex_tangents() {
         tangents_.assign(positions_.size(), Vec3::zero());
+        std::vector<Vec3> bitangents(positions_.size(), Vec3::zero());
+        tangent_signs_.assign(positions_.size(), 1.0f);
 
         const std::size_t tri_count = triangle_count();
         for (std::size_t tri = 0; tri < tri_count; ++tri) {
@@ -293,22 +319,30 @@ private:
 
             const float denom = duv1.x * duv2.y - duv1.y * duv2.x;
             Vec3 tangent;
+            Vec3 bitangent;
 
             if (std::fabs(denom) < 1e-12f) {
                 tangent = dp1;
+                bitangent = dp2;
             } else {
                 const float r = 1.0f / denom;
                 tangent = (dp1 * duv2.y - dp2 * duv1.y) * r;
+                bitangent = (dp2 * duv1.x - dp1 * duv2.x) * r;
             }
 
             tangents_[i0] += tangent;
             tangents_[i1] += tangent;
             tangents_[i2] += tangent;
+
+            bitangents[i0] += bitangent;
+            bitangents[i1] += bitangent;
+            bitangents[i2] += bitangent;
         }
 
         for (std::size_t i = 0; i < tangents_.size(); ++i) {
             const Vec3 n = normals_[i];
             Vec3 t = tangents_[i];
+            const Vec3 b = bitangents[i];
 
             t = t - dot(t, n) * n;
             if (t.length_squared() < 1e-16f) {
@@ -317,6 +351,8 @@ private:
                 t = normalize(t);
             }
 
+            const float sign = (dot(cross(n, t), b) < 0.0f) ? -1.0f : 1.0f;
+            tangent_signs_[i] = sign;
             tangents_[i] = t;
         }
     }
@@ -707,6 +743,7 @@ private:
     std::vector<Vec2> uvs_;
     std::vector<std::uint32_t> indices_;
     std::vector<Vec3> tangents_;
+    std::vector<float> tangent_signs_;
 
     AABB bounds_;
     std::vector<AABB> tri_boxes_;

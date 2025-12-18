@@ -33,6 +33,7 @@ int main(int argc, char** argv) {
     std::string gltf_path;
     std::string env_path;
     bool use_gltf_camera = false;
+    bool hide_env_bg = false;
     bool turntable_mode = false;
     int turntable_frames = 60;
     float turntable_radius = 0.0f;
@@ -53,6 +54,8 @@ int main(int argc, char** argv) {
             gltf_path = argv[++i];
         } else if (arg == "--env" && i + 1 < argc) {
             env_path = argv[++i];
+        } else if (arg == "--hide-env-bg") {
+            hide_env_bg = true;
         } else if (arg == "--spp" && i + 1 < argc) {
             samples_per_pixel = std::atoi(argv[++i]);
         } else if (arg == "--max-depth" && i + 1 < argc) {
@@ -175,6 +178,12 @@ int main(int argc, char** argv) {
             }
             return 1;
         }
+    } else if (hide_env_bg) {
+        std::cerr << "Warning: --hide-env-bg set without --env; if the scene has no other lights it will render black.\n";
+    }
+    scene.hide_environment_background = hide_env_bg;
+    if (scene.hide_environment_background && scene.environment && scene.environment->valid()) {
+        std::cout << "Environment background hidden (environment still used for lighting).\n";
     }
 
     scene.build_bvh();

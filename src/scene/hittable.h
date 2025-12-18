@@ -14,6 +14,7 @@ struct HitRecord {
     Vec3 point;
     Vec3 normal;
     Vec3 tangent;
+    float tangent_sign = 1.0f;
     float t;
     float u;
     float v;

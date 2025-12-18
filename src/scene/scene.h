@@ -14,6 +14,7 @@ public:
     HittablePtr accel;
     LightCollection lights;
     EnvironmentMapPtr environment;
+    bool hide_environment_background = false;
 
     void build_bvh() {
         if (objects.empty()) {

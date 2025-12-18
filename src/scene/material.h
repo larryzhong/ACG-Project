@@ -434,7 +434,7 @@ public:
             tangent_normal.y *= strength_;
             tangent_normal = normalize(tangent_normal);
             return NormalMapTexture::apply_normal_map(
-                tangent_normal, hit.normal, hit.tangent);
+                tangent_normal, hit.normal, hit.tangent, hit.tangent_sign);
         }
         return hit.normal;
     }
@@ -498,14 +498,18 @@ public:
                    float roughness_factor,
                    const TexturePtr& roughness_tex,
                    const NormalMapPtr& normal_map,
-                   float normal_strength)
+                   float normal_strength,
+                   const TexturePtr& occlusion_tex = nullptr,
+                   float occlusion_strength = 1.0f)
         : base_color_(base_color),
           metallic_factor_(metallic_factor),
           metallic_tex_(metallic_tex),
           roughness_factor_(roughness_factor),
           roughness_tex_(roughness_tex),
           normal_map_(normal_map),
-          normal_strength_(normal_strength) {}
+          normal_strength_(normal_strength),
+          occlusion_tex_(occlusion_tex),
+          occlusion_strength_(occlusion_strength) {}
 
     Vec3 get_shading_normal(const HitRecord& hit) const override {
         if (normal_map_ && normal_map_->valid()) {
@@ -514,7 +518,7 @@ public:
             tangent_normal.y *= normal_strength_;
             tangent_normal = normalize(tangent_normal);
             return NormalMapTexture::apply_normal_map(
-                tangent_normal, hit.normal, hit.tangent);
+                tangent_normal, hit.normal, hit.tangent, hit.tangent_sign);
         }
         return hit.normal;
     }
@@ -567,7 +571,9 @@ public:
         const Color F = schlick_fresnel(f0, v_dot_h);
 
         result += (D * G) * F / (4.0f * n_dot_v * n_dot_l);
-        return result;
+
+        const float ao = occlusion(hit);
+        return result * ao;
     }
 
     float pdf(const Vec3& wo,
@@ -677,4 +683,16 @@ private:
     TexturePtr roughness_tex_;
     NormalMapPtr normal_map_;
     float normal_strength_ = 1.0f;
+    TexturePtr occlusion_tex_;
+    float occlusion_strength_ = 1.0f;
+
+    float occlusion(const HitRecord& hit) const {
+        if (!occlusion_tex_) {
+            return 1.0f;
+        }
+        const float tex = occlusion_tex_->value(hit).x;
+        // glTF: occlusion = mix(1.0, tex, strength)
+        const float ao = 1.0f + occlusion_strength_ * (tex - 1.0f);
+        return clamp_float(ao, 0.0f, 1.0f);
+    }
 };

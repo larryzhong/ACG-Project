@@ -430,6 +430,9 @@ private:
                 if (!count_emitted) {
                     return Color(0.0f);
                 }
+                if (depth == 0 && scene.hide_environment_background) {
+                    return Color(0.0f);
+                }
                 return scene.environment->Le(r.direction);
             }
             return Color(0.0f);
