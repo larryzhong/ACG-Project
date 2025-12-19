@@ -69,9 +69,8 @@ static NormalMapPtr load_normal_map(const tinygltf::Model& model,
     const tinygltf::Image& image = model.images[tex.source];
 
     NormalMapPtr result;
-    // glTF UV origin is bottom-left (OpenGL convention), while decoded image rows are top-left.
-    // Our texture sampling expects to flip V for images, so keep flip enabled here.
-    constexpr bool kFlipV = true;
+    // glTF defines (0,0) at the upper-left of the image, so do not flip V here.
+    constexpr bool kFlipV = false;
     const bool is_data_uri =
         image.uri.size() >= 5 && image.uri.rfind("data:", 0) == 0;
     if (!image.image.empty() && image.width > 0 && image.height > 0) {
@@ -512,9 +511,8 @@ static TexturePtr load_texture(const tinygltf::Model& model,
     const tinygltf::Image& image = model.images[tex.source];
 
     TexturePtr result;
-    // glTF UV origin is bottom-left (OpenGL convention), while decoded image rows are top-left.
-    // Our texture sampling expects to flip V for images, so keep flip enabled here.
-    constexpr bool kFlipV = true;
+    // glTF defines (0,0) at the upper-left of the image, so do not flip V here.
+    constexpr bool kFlipV = false;
     const bool is_data_uri =
         image.uri.size() >= 5 && image.uri.rfind("data:", 0) == 0;
     if (!image.image.empty() && image.width > 0 && image.height > 0) {
@@ -614,10 +612,6 @@ static MaterialBuildResult build_material(const tinygltf::Model& model,
         emissive_tex = std::make_shared<ColorFactorTexture>(emissive_tex, emissive_factor);
     } else if (emissive_factor.x > 0.0f || emissive_factor.y > 0.0f || emissive_factor.z > 0.0f) {
         emissive_tex = std::make_shared<SolidColor>(emissive_factor);
-    }
-
-    if (emissive_tex) {
-        // Wrap the base material with emission so it can both scatter and emit.
     }
 
     const float metallic_factor = static_cast<float>(mat.pbrMetallicRoughness.metallicFactor);

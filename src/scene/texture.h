@@ -465,8 +465,9 @@ private:
             return Color(1.0f, 0.0f, 1.0f);
         }
 
-        u = clamp_float(u, 0.0f, 1.0f);
-        v = flip_v_ ? (1.0f - clamp_float(v, 0.0f, 1.0f)) : clamp_float(v, 0.0f, 1.0f);
+        u = u - std::floor(u);
+        if (flip_v_) v = 1.0f - v;
+        v = v - std::floor(v);
 
         const float fx = u * static_cast<float>(level.width - 1);
         const float fy = v * static_cast<float>(level.height - 1);
@@ -494,8 +495,9 @@ private:
             return 1.0f;
         }
 
-        u = clamp_float(u, 0.0f, 1.0f);
-        v = flip_v_ ? (1.0f - clamp_float(v, 0.0f, 1.0f)) : clamp_float(v, 0.0f, 1.0f);
+        u = u - std::floor(u);
+        if (flip_v_) v = 1.0f - v;
+        v = v - std::floor(v);
 
         const float fx = u * static_cast<float>(level.width - 1);
         const float fy = v * static_cast<float>(level.height - 1);
@@ -676,8 +678,9 @@ public:
             return Vec3(0.0f, 0.0f, 1.0f);
         }
 
-        u = clamp_float(u, 0.0f, 1.0f);
-        v = flip_v_ ? (1.0f - clamp_float(v, 0.0f, 1.0f)) : clamp_float(v, 0.0f, 1.0f);
+        u = u - std::floor(u);
+        if (flip_v_) v = 1.0f - v;
+        v = v - std::floor(v);
 
         int x = static_cast<int>(u * (width_ - 1));
         int y = static_cast<int>(v * (height_ - 1));
