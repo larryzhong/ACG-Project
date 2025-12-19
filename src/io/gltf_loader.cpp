@@ -43,6 +43,18 @@ struct TextureKeyHash {
     }
 };
 
+static ImageTexture::WrapMode gltf_wrap_to_mode(int wrap) {
+    switch (wrap) {
+        case TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE:
+            return ImageTexture::WrapMode::ClampToEdge;
+        case TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT:
+            return ImageTexture::WrapMode::MirroredRepeat;
+        case TINYGLTF_TEXTURE_WRAP_REPEAT:
+        default:
+            return ImageTexture::WrapMode::Repeat;
+    }
+}
+
 struct MaterialBuildResult {
     MaterialPtr material;
     bool emissive = false;
@@ -62,6 +74,14 @@ static NormalMapPtr load_normal_map(const tinygltf::Model& model,
     }
 
     const tinygltf::Texture& tex = model.textures[texture_index];
+    ImageTexture::WrapMode wrap_s = ImageTexture::WrapMode::Repeat;
+    ImageTexture::WrapMode wrap_t = ImageTexture::WrapMode::Repeat;
+    if (tex.sampler >= 0 && tex.sampler < static_cast<int>(model.samplers.size())) {
+        const tinygltf::Sampler& s = model.samplers[tex.sampler];
+        wrap_s = gltf_wrap_to_mode(s.wrapS);
+        wrap_t = gltf_wrap_to_mode(s.wrapT);
+    }
+        
     if (tex.source < 0 || tex.source >= static_cast<int>(model.images.size())) {
         return nullptr;
     }
@@ -75,13 +95,13 @@ static NormalMapPtr load_normal_map(const tinygltf::Model& model,
         image.uri.size() >= 5 && image.uri.rfind("data:", 0) == 0;
     if (!image.image.empty() && image.width > 0 && image.height > 0) {
         const int channels = (image.component > 0) ? image.component : 4;
-        result = std::make_shared<NormalMapTexture>(image.image, image.width, image.height, channels, kFlipV);
+        result = std::make_shared<NormalMapTexture>(image.image, image.width, image.height, channels, kFlipV, wrap_s, wrap_t);
     } else if (is_data_uri) {
         if (err) *err += "Data URI image was not decoded.\n";
         result = nullptr;
     } else if (!image.uri.empty()) {
         std::filesystem::path p = base_dir / std::filesystem::path(image.uri);
-        result = std::make_shared<NormalMapTexture>(p.string(), kFlipV);
+        result = std::make_shared<NormalMapTexture>(p.string(), kFlipV, wrap_s, wrap_t);
     } else {
         if (err) *err += "Unsupported image source.\n";
         result = nullptr;
@@ -504,6 +524,13 @@ static TexturePtr load_texture(const tinygltf::Model& model,
     }
 
     const tinygltf::Texture& tex = model.textures[texture_index];
+    ImageTexture::WrapMode wrap_s = ImageTexture::WrapMode::Repeat;
+    ImageTexture::WrapMode wrap_t = ImageTexture::WrapMode::Repeat;
+    if (tex.sampler >= 0 && tex.sampler < static_cast<int>(model.samplers.size())) {
+        const tinygltf::Sampler& s = model.samplers[tex.sampler];
+        wrap_s = gltf_wrap_to_mode(s.wrapS);
+        wrap_t = gltf_wrap_to_mode(s.wrapT);
+    }
     if (tex.source < 0 || tex.source >= static_cast<int>(model.images.size())) {
         return nullptr;
     }
@@ -518,13 +545,13 @@ static TexturePtr load_texture(const tinygltf::Model& model,
     if (!image.image.empty() && image.width > 0 && image.height > 0) {
         const int channels = (image.component > 0) ? image.component : 4;
         result = std::make_shared<ImageTexture>(
-            image.image, image.width, image.height, channels, color_space, channel, kFlipV);
+            image.image, image.width, image.height, channels, color_space, channel, kFlipV, wrap_s, wrap_t);
     } else if (is_data_uri) {
         if (err) *err += "Data URI image was not decoded.\n";
         result = nullptr;
     } else if (!image.uri.empty()) {
         std::filesystem::path p = base_dir / std::filesystem::path(image.uri);
-        result = std::make_shared<ImageTexture>(p.string(), color_space, channel, kFlipV);
+        result = std::make_shared<ImageTexture>(p.string(), color_space, channel, kFlipV, wrap_s, wrap_t);
     } else {
         if (err) *err += "Unsupported image source.\n";
         result = nullptr;

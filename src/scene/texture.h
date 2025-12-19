@@ -93,6 +93,12 @@ public:
         Linear
     };
 
+    enum class WrapMode {
+        Repeat,
+        ClampToEdge,
+        MirroredRepeat
+    };
+
     ImageTexture()
         : data_(nullptr),
           width_(0),
@@ -101,12 +107,16 @@ public:
           color_space_(ColorSpace::sRGB),
           channel_(-1),
           flip_v_(true),
+          wrap_s_(WrapMode::Repeat),
+          wrap_t_(WrapMode::Repeat),
           owns_memory_(false) {}
 
     explicit ImageTexture(const std::string& filename,
                           ColorSpace color_space = ColorSpace::sRGB,
                           int channel = -1,
-                          bool flip_v = true)
+                          bool flip_v = true,
+                          WrapMode wrap_s = WrapMode::Repeat,
+                          WrapMode wrap_t = WrapMode::Repeat)
         : data_(nullptr),
           width_(0),
           height_(0),
@@ -114,6 +124,8 @@ public:
           color_space_(color_space),
           channel_(channel),
           flip_v_(flip_v),
+          wrap_s_(wrap_s),
+          wrap_t_(wrap_t),
           owns_memory_(false) {
         data_ = stbi_load(filename.c_str(), &width_, &height_, &channels_, 0);
         if (!data_) {
@@ -131,7 +143,9 @@ public:
                  int channels,
                  ColorSpace color_space = ColorSpace::sRGB,
                  int channel = -1,
-                 bool flip_v = true)
+                 bool flip_v = true,
+                 WrapMode wrap_s = WrapMode::Repeat,
+                 WrapMode wrap_t = WrapMode::Repeat)
         : owned_data_(std::move(bytes)),
           data_(nullptr),
           width_(width),
@@ -140,6 +154,8 @@ public:
           color_space_(color_space),
           channel_(channel),
           flip_v_(flip_v),
+          wrap_s_(wrap_s),
+          wrap_t_(wrap_t),
           owns_memory_(true) {
         if (width_ <= 0 || height_ <= 0 || channels_ <= 0) {
             width_ = height_ = channels_ = 0;
@@ -178,6 +194,8 @@ public:
           color_space_(other.color_space_),
           channel_(other.channel_),
           flip_v_(other.flip_v_),
+          wrap_s_(other.wrap_s_),
+          wrap_t_(other.wrap_t_),
           mip_levels_(std::move(other.mip_levels_)),
           owns_memory_(other.owns_memory_) {
         other.data_ = nullptr;
@@ -201,6 +219,8 @@ public:
             color_space_ = other.color_space_;
             channel_ = other.channel_;
             flip_v_ = other.flip_v_;
+            wrap_s_ = other.wrap_s_;
+            wrap_t_ = other.wrap_t_;
             mip_levels_ = std::move(other.mip_levels_);
             owns_memory_ = other.owns_memory_;
             other.data_ = nullptr;
@@ -236,8 +256,24 @@ public:
     bool valid() const { return !mip_levels_.empty(); }
     int width() const { return width_; }
     int height() const { return height_; }
+    static float wrap_coord(float x, WrapMode mode) {
+        switch (mode) {
+            case WrapMode::ClampToEdge:
+                return clamp_float(x, 0.0f, 1.0f);
+            case WrapMode::MirroredRepeat: {
+                float m = std::fmod(x, 2.0f);
+                if (m < 0.0f) m += 2.0f;
+                if (m > 1.0f) m = 2.0f - m;
+                return m;
+            }
+            case WrapMode::Repeat:
+            default:
+                return x - std::floor(x);
+        }
+    }
 
 private:
+
     struct MipLevel {
         int width = 0;
         int height = 0;
@@ -465,9 +501,9 @@ private:
             return Color(1.0f, 0.0f, 1.0f);
         }
 
-        u = u - std::floor(u);
+        u = wrap_coord(u, wrap_s_);
+        v = wrap_coord(v, wrap_t_);
         if (flip_v_) v = 1.0f - v;
-        v = v - std::floor(v);
 
         const float fx = u * static_cast<float>(level.width - 1);
         const float fy = v * static_cast<float>(level.height - 1);
@@ -495,9 +531,9 @@ private:
             return 1.0f;
         }
 
-        u = u - std::floor(u);
+        u = wrap_coord(u, wrap_s_);
+        v = wrap_coord(v, wrap_t_);
         if (flip_v_) v = 1.0f - v;
-        v = v - std::floor(v);
 
         const float fx = u * static_cast<float>(level.width - 1);
         const float fy = v * static_cast<float>(level.height - 1);
@@ -596,6 +632,8 @@ private:
     ColorSpace color_space_;
     int channel_;
     bool flip_v_;
+    WrapMode wrap_s_;
+    WrapMode wrap_t_;
     std::vector<MipLevel> mip_levels_;
     bool owns_memory_;
 };
@@ -609,12 +647,18 @@ public:
           height_(0),
           channels_(0),
           flip_v_(true),
+          wrap_s_(ImageTexture::WrapMode::Repeat),
+          wrap_t_(ImageTexture::WrapMode::Repeat),
           owns_memory_(false) {}
 
-    explicit NormalMapTexture(const std::string& filename, bool flip_v = true) {
+    explicit NormalMapTexture(const std::string& filename, bool flip_v = true,
+                              ImageTexture::WrapMode wrap_s = ImageTexture::WrapMode::Repeat,
+                              ImageTexture::WrapMode wrap_t = ImageTexture::WrapMode::Repeat) {
         int channels_in_file = 0;
         data_ = stbi_load(filename.c_str(), &width_, &height_, &channels_in_file, 3);
         flip_v_ = flip_v;
+        wrap_s_ = wrap_s;
+        wrap_t_ = wrap_t;
         owns_memory_ = false;
         if (!data_) {
             std::cerr << "ERROR: Could not load normal map: " << filename << "\n";
@@ -629,13 +673,17 @@ public:
                      int width,
                      int height,
                      int channels,
-                     bool flip_v = true)
+                     bool flip_v = true,
+                     ImageTexture::WrapMode wrap_s = ImageTexture::WrapMode::Repeat,
+                     ImageTexture::WrapMode wrap_t = ImageTexture::WrapMode::Repeat)
         : owned_data_(std::move(bytes)),
           data_(nullptr),
           width_(width),
           height_(height),
           channels_(channels),
           flip_v_(flip_v),
+          wrap_s_(wrap_s),
+          wrap_t_(wrap_t),
           owns_memory_(true) {
         if (width_ <= 0 || height_ <= 0 || channels_ <= 0) {
             width_ = height_ = channels_ = 0;
@@ -667,6 +715,8 @@ public:
           height_(other.height_),
           channels_(other.channels_),
           flip_v_(other.flip_v_),
+          wrap_s_(other.wrap_s_),
+          wrap_t_(other.wrap_t_),
           owns_memory_(other.owns_memory_) {
         other.data_ = nullptr;
         other.width_ = other.height_ = other.channels_ = 0;
@@ -678,9 +728,9 @@ public:
             return Vec3(0.0f, 0.0f, 1.0f);
         }
 
-        u = u - std::floor(u);
+        u = ImageTexture::wrap_coord(u, wrap_s_);
+        v = ImageTexture::wrap_coord(v, wrap_t_);
         if (flip_v_) v = 1.0f - v;
-        v = v - std::floor(v);
 
         int x = static_cast<int>(u * (width_ - 1));
         int y = static_cast<int>(v * (height_ - 1));
@@ -719,6 +769,8 @@ private:
     int height_;
     int channels_;
     bool flip_v_;
+    ImageTexture::WrapMode wrap_s_;
+    ImageTexture::WrapMode wrap_t_;
     bool owns_memory_;
 };
 
