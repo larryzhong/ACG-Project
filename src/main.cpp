@@ -39,6 +39,10 @@ int main(int argc, char** argv) {
     float turntable_radius = 0.0f;
     float turntable_height = 0.0f;
     Vec3 turntable_center(0.0f, 0.0f, 0.0f);
+    Vec3 look_from_override(0.0f);
+    Vec3 look_at_override(0.0f);
+    Vec3 up_override(0.0f, 1.0f, 0.0f);
+    bool override_camera = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -83,6 +87,19 @@ int main(int argc, char** argv) {
             turntable_center = Vec3(cx, cy, cz);
         } else if (arg == "--gltf-camera") {
             use_gltf_camera = true;
+        } else if (arg == "--look-from" && i + 3 < argc) {
+            look_from_override.x = static_cast<float>(std::atof(argv[++i]));
+            look_from_override.y = static_cast<float>(std::atof(argv[++i]));
+            look_from_override.z = static_cast<float>(std::atof(argv[++i]));
+            override_camera = true;
+        } else if (arg == "--look-at" && i + 3 < argc) {
+            look_at_override.x = static_cast<float>(std::atof(argv[++i]));
+            look_at_override.y = static_cast<float>(std::atof(argv[++i]));
+            look_at_override.z = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--up" && i + 3 < argc) {
+            up_override.x = static_cast<float>(std::atof(argv[++i]));
+            up_override.y = static_cast<float>(std::atof(argv[++i]));
+            up_override.z = static_cast<float>(std::atof(argv[++i]));
         }
     }
 
@@ -96,7 +113,7 @@ int main(int argc, char** argv) {
     
     CameraSettings cam_settings;
     cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
-    cam_settings.vertical_fov_deg = 40.0f;
+    cam_settings.vertical_fov_deg = 45.0f;
     cam_settings.image_width = width;
     cam_settings.image_height = height;
     
@@ -189,7 +206,9 @@ int main(int argc, char** argv) {
     scene.build_bvh();
 
     if (!use_gltf_camera) {
-        cam_settings.up = Vec3(0.0f, 1.0f, 0.0f);
+        cam_settings.look_from = look_from_override;
+        cam_settings.look_at = look_at_override;
+        cam_settings.up = up_override;
     }
     cam_settings.aperture = aperture;
     cam_settings.t0 = shutter_open;
