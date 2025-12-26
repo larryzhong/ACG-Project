@@ -552,7 +552,8 @@ public:
         const Color f0 = (1.0f - metallic_value) * dielectric_f0 + metallic_value * base_color;
         const Color diffuse_color = (1.0f - metallic_value) * base_color;
 
-        Color result = diffuse_color * (1.0f / kPi);
+        const float ao = occlusion(hit);
+        Color result = diffuse_color * (ao * (1.0f / kPi));
 
         const Vec3 h_un = wo + wi;
         if (h_un.length_squared() <= 1e-20f) {
@@ -572,8 +573,7 @@ public:
 
         result += (D * G) * F / (4.0f * n_dot_v * n_dot_l);
 
-        const float ao = occlusion(hit);
-        return result * ao;
+        return result;
     }
 
     float pdf(const Vec3& wo,
