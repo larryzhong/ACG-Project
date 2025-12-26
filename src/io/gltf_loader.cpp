@@ -60,10 +60,47 @@ struct MaterialBuildResult {
     bool emissive = false;
 };
 
+static float gltf_clamp01(float v) {
+    if (!std::isfinite(v)) {
+        return 0.0f;
+    }
+    return clamp_float(v, 0.0f, 1.0f);
+}
+
+static int gltf_parse_texture_index(const tinygltf::Value& tex_info) {
+    if (!tex_info.IsObject()) {
+        return -1;
+    }
+    if (!tex_info.Has("index")) {
+        return -1;
+    }
+    const tinygltf::Value& idx = tex_info.Get("index");
+    if (!idx.IsNumber()) {
+        return -1;
+    }
+    return idx.GetNumberAsInt();
+}
+
+static bool gltf_parse_vec3(const tinygltf::Value& arr, Color& out) {
+    if (!arr.IsArray() || arr.ArrayLen() < 3) {
+        return false;
+    }
+    const tinygltf::Value& x = arr.Get(0);
+    const tinygltf::Value& y = arr.Get(1);
+    const tinygltf::Value& z = arr.Get(2);
+    if (!x.IsNumber() || !y.IsNumber() || !z.IsNumber()) {
+        return false;
+    }
+    out = Color(static_cast<float>(x.GetNumberAsDouble()),
+                static_cast<float>(y.GetNumberAsDouble()),
+                static_cast<float>(z.GetNumberAsDouble()));
+    return true;
+}
+
 static NormalMapPtr load_normal_map(const tinygltf::Model& model,
-                                    int texture_index,
-                                    const std::filesystem::path& base_dir,
-                                    std::unordered_map<int, NormalMapPtr>& cache,
+                                     int texture_index,
+                                     const std::filesystem::path& base_dir,
+                                     std::unordered_map<int, NormalMapPtr>& cache,
                                     std::string* err) {
     if (texture_index < 0 || texture_index >= static_cast<int>(model.textures.size())) {
         return nullptr;
@@ -576,6 +613,62 @@ static MaterialBuildResult build_material(const tinygltf::Model& model,
 
     const tinygltf::Material& mat = model.materials[material_index];
 
+    float ior = 1.5f;
+    if (auto it = mat.extensions.find("KHR_materials_ior"); it != mat.extensions.end()) {
+        const tinygltf::Value& ext = it->second;
+        if (ext.IsObject() && ext.Has("ior") && ext.Get("ior").IsNumber()) {
+            ior = static_cast<float>(ext.Get("ior").GetNumberAsDouble());
+        }
+    }
+    ior = std::max(1.0f, ior);
+
+    float transmission_factor = 0.0f;
+    int transmission_tex_index = -1;
+    if (auto it = mat.extensions.find("KHR_materials_transmission"); it != mat.extensions.end()) {
+        const tinygltf::Value& ext = it->second;
+        if (ext.IsObject()) {
+            if (ext.Has("transmissionFactor") && ext.Get("transmissionFactor").IsNumber()) {
+                transmission_factor = static_cast<float>(ext.Get("transmissionFactor").GetNumberAsDouble());
+            }
+            if (ext.Has("transmissionTexture")) {
+                transmission_tex_index = gltf_parse_texture_index(ext.Get("transmissionTexture"));
+            }
+        }
+    }
+    transmission_factor = gltf_clamp01(transmission_factor);
+
+    float thickness_factor = 0.0f;
+    int thickness_tex_index = -1;
+    Color attenuation_color(1.0f);
+    float attenuation_distance = std::numeric_limits<float>::infinity();
+    if (auto it = mat.extensions.find("KHR_materials_volume"); it != mat.extensions.end()) {
+        const tinygltf::Value& ext = it->second;
+        if (ext.IsObject()) {
+            if (ext.Has("thicknessFactor") && ext.Get("thicknessFactor").IsNumber()) {
+                thickness_factor = static_cast<float>(ext.Get("thicknessFactor").GetNumberAsDouble());
+            }
+            if (ext.Has("thicknessTexture")) {
+                thickness_tex_index = gltf_parse_texture_index(ext.Get("thicknessTexture"));
+            }
+            if (ext.Has("attenuationColor")) {
+                Color c;
+                if (gltf_parse_vec3(ext.Get("attenuationColor"), c)) {
+                    attenuation_color = c;
+                }
+            }
+            if (ext.Has("attenuationDistance") && ext.Get("attenuationDistance").IsNumber()) {
+                attenuation_distance = static_cast<float>(ext.Get("attenuationDistance").GetNumberAsDouble());
+            }
+        }
+    }
+    thickness_factor = std::max(0.0f, thickness_factor);
+    attenuation_color = Color(gltf_clamp01(attenuation_color.x),
+                              gltf_clamp01(attenuation_color.y),
+                              gltf_clamp01(attenuation_color.z));
+    if (!(attenuation_distance > 0.0f) || !std::isfinite(attenuation_distance)) {
+        attenuation_distance = std::numeric_limits<float>::infinity();
+    }
+
     Color base_rgb(1.0f);
     float base_alpha = 1.0f;
     if (mat.pbrMetallicRoughness.baseColorFactor.size() == 4) {
@@ -693,15 +786,63 @@ static MaterialBuildResult build_material(const tinygltf::Model& model,
         }
     }
 
-    MaterialPtr base_material = std::make_shared<PrincipledBSDF>(base_tex,
-                                                                 metallic_factor,
-                                                                 metallic_tex,
-                                                                 roughness_factor,
-                                                                 roughness_tex,
-                                                                 normal_map,
-                                                                 normal_strength,
-                                                                 occlusion_tex,
-                                                                 occlusion_strength);
+    TexturePtr transmission_tex;
+    if (transmission_tex_index >= 0) {
+        transmission_tex = load_texture(model,
+                                        transmission_tex_index,
+                                        base_dir,
+                                        ImageTexture::ColorSpace::Linear,
+                                        0,
+                                        texture_cache,
+                                        err);
+    }
+
+    TexturePtr thickness_tex;
+    if (thickness_tex_index >= 0) {
+        thickness_tex = load_texture(model,
+                                     thickness_tex_index,
+                                     base_dir,
+                                     ImageTexture::ColorSpace::Linear,
+                                     0,
+                                     texture_cache,
+                                     err);
+    }
+
+    const bool use_transmission =
+        (alpha_mode == "BLEND") || (transmission_factor > 0.0f) || (transmission_tex != nullptr);
+
+    MaterialPtr base_material;
+    if (use_transmission) {
+        float factor = transmission_factor;
+        if (factor <= 0.0f && transmission_tex) {
+            factor = 1.0f;
+        }
+        if (factor <= 0.0f && (alpha_mode == "BLEND")) {
+            factor = 1.0f;
+        }
+
+        base_material = std::make_shared<DielectricTransmissionBSDF>(ior,
+                                                                     base_tex,
+                                                                     normal_map,
+                                                                     normal_strength,
+                                                                     factor,
+                                                                     transmission_tex,
+                                                                     alpha_mode == "BLEND",
+                                                                     thickness_factor,
+                                                                     thickness_tex,
+                                                                     attenuation_color,
+                                                                     attenuation_distance);
+    } else {
+        base_material = std::make_shared<PrincipledBSDF>(base_tex,
+                                                         metallic_factor,
+                                                         metallic_tex,
+                                                         roughness_factor,
+                                                         roughness_tex,
+                                                         normal_map,
+                                                         normal_strength,
+                                                         occlusion_tex,
+                                                         occlusion_strength);
+    }
 
     if (emissive_tex) {
         out.material = std::make_shared<EmissiveMaterial>(base_material, emissive_tex, mat.doubleSided);

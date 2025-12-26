@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 
 #include "core/color.h"
@@ -420,6 +421,184 @@ private:
     }
 
     float ir_;
+};
+
+class DielectricTransmissionBSDF : public Material {
+public:
+    DielectricTransmissionBSDF(float index_of_refraction,
+                               const TexturePtr& transmittance,
+                               const NormalMapPtr& normal_map = nullptr,
+                               float normal_strength = 1.0f,
+                               float transmission_factor = 1.0f,
+                               const TexturePtr& transmission_tex = nullptr,
+                               bool use_base_alpha_as_transmission = false,
+                               float thickness_factor = 0.0f,
+                               const TexturePtr& thickness_tex = nullptr,
+                               const Color& attenuation_color = Color(1.0f),
+                               float attenuation_distance = std::numeric_limits<float>::infinity())
+        : ir_(index_of_refraction),
+          transmittance_(transmittance),
+          normal_map_(normal_map),
+          normal_strength_(normal_strength),
+          transmission_factor_(transmission_factor),
+          transmission_tex_(transmission_tex),
+          use_base_alpha_as_transmission_(use_base_alpha_as_transmission),
+          thickness_factor_(thickness_factor),
+          thickness_tex_(thickness_tex),
+          attenuation_color_(attenuation_color),
+          attenuation_distance_(attenuation_distance) {}
+
+    Vec3 get_shading_normal(const HitRecord& hit) const override {
+        if (normal_map_ && normal_map_->valid()) {
+            Vec3 tangent_normal = normal_map_->get_normal(hit.u, hit.v);
+            tangent_normal.x *= normal_strength_;
+            tangent_normal.y *= normal_strength_;
+            tangent_normal = normalize(tangent_normal);
+            return NormalMapTexture::apply_normal_map(
+                tangent_normal, hit.normal, hit.tangent, hit.tangent_sign);
+        }
+        return hit.normal;
+    }
+
+    bool sample(const Vec3& wo,
+                const HitRecord& hit,
+                Vec3& wi,
+                float& out_pdf,
+                Color& out_f,
+                bool& out_is_delta,
+                RNG& rng) const override {
+        const Vec3 n = get_shading_normal(hit);
+        const Vec3 incident = normalize(-wo);
+
+        const float refraction_ratio = hit.front_face ? (1.0f / ir_) : ir_;
+
+        const float cos_theta = std::fmin(-dot(incident, n), 1.0f);
+        const float sin_theta = std::sqrt(std::max(0.0f, 1.0f - cos_theta * cos_theta));
+
+        const float t = transmission(hit);
+        const bool cannot_refract = (refraction_ratio * sin_theta > 1.0f);
+        Vec3 direction;
+
+        const float reflect_prob = schlick(cos_theta, ir_);
+
+        if (cannot_refract || rng.uniform() < reflect_prob) {
+            direction = reflect(incident, n);
+            wi = normalize(direction);
+            out_pdf = 1.0f;
+            out_f = Color(1.0f) * (1.0f / std::max(1e-6f, abs_dot(n, wi)));
+            out_is_delta = true;
+            return true;
+        }
+
+        if (t <= 1e-6f || rng.uniform() > t) {
+            return false;
+        }
+
+        direction = refract(incident, n, refraction_ratio);
+        if (direction.length_squared() < 1e-10f) {
+            direction = reflect(incident, n);
+            wi = normalize(direction);
+            out_pdf = 1.0f;
+            out_f = Color(1.0f) * (1.0f / std::max(1e-6f, abs_dot(n, wi)));
+            out_is_delta = true;
+            return true;
+        }
+
+        wi = normalize(direction);
+        const float abs_cos = std::max(1e-6f, abs_dot(n, wi));
+        const Color Tr = transmission_color(hit, abs_cos);
+        out_pdf = 1.0f;
+        out_f = Tr * (1.0f / abs_cos);
+        out_is_delta = true;
+        return true;
+    }
+
+    float cone_roughness(const HitRecord& /*hit*/) const override {
+        return 0.0f;
+    }
+
+    float opacity(const HitRecord& /*hit*/) const override {
+        return 1.0f;
+    }
+
+private:
+    static float schlick(float cosine, float ref_idx) {
+        float r0 = (1.0f - ref_idx) / (1.0f + ref_idx);
+        r0 = r0 * r0;
+        return r0 + (1.0f - r0) * std::pow(1.0f - cosine, 5.0f);
+    }
+
+    float transmission(const HitRecord& hit) const {
+        float t = clamp_float(transmission_factor_, 0.0f, 1.0f);
+        if (transmission_tex_) {
+            t *= clamp_float(transmission_tex_->value(hit).x, 0.0f, 1.0f);
+        }
+        if (use_base_alpha_as_transmission_ && transmittance_) {
+            t *= clamp_float(1.0f - transmittance_->alpha(hit), 0.0f, 1.0f);
+        }
+        return clamp_float(t, 0.0f, 1.0f);
+    }
+
+    static float clamp01(float v) {
+        return clamp_float(v, 0.0f, 1.0f);
+    }
+
+    Color transmission_color(const HitRecord& hit, float abs_cos_theta) const {
+        Color color(1.0f);
+        if (transmittance_) {
+            const Color c = transmittance_->value(hit);
+            color = Color(clamp01(c.x), clamp01(c.y), clamp01(c.z));
+        }
+
+        const float thickness = thickness_at(hit);
+        if (!(thickness > 0.0f)) {
+            return color;
+        }
+
+        if (!(attenuation_distance_ > 0.0f) || !std::isfinite(attenuation_distance_)) {
+            return color;
+        }
+
+        const float distance = thickness / std::max(1e-6f, abs_cos_theta);
+        const float exponent = distance / attenuation_distance_;
+        if (!(exponent > 0.0f) || !std::isfinite(exponent)) {
+            return color;
+        }
+
+        const Color a = Color(clamp01(attenuation_color_.x),
+                              clamp01(attenuation_color_.y),
+                              clamp01(attenuation_color_.z));
+
+        auto pow_c = [&](float v) {
+            if (!(v > 0.0f)) {
+                return 0.0f;
+            }
+            return std::pow(v, exponent);
+        };
+
+        const Color atten(pow_c(a.x), pow_c(a.y), pow_c(a.z));
+        return color * atten;
+    }
+
+    float thickness_at(const HitRecord& hit) const {
+        float thickness = std::max(0.0f, thickness_factor_);
+        if (thickness_tex_) {
+            thickness *= std::max(0.0f, thickness_tex_->value(hit).x);
+        }
+        return thickness;
+    }
+
+    float ir_ = 1.5f;
+    TexturePtr transmittance_;
+    NormalMapPtr normal_map_;
+    float normal_strength_ = 1.0f;
+    float transmission_factor_ = 1.0f;
+    TexturePtr transmission_tex_;
+    bool use_base_alpha_as_transmission_ = false;
+    float thickness_factor_ = 0.0f;
+    TexturePtr thickness_tex_;
+    Color attenuation_color_ = Color(1.0f);
+    float attenuation_distance_ = std::numeric_limits<float>::infinity();
 };
 
 class NormalMappedLambertian : public Material {
