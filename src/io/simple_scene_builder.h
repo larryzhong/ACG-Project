@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "core/color.h"
 #include "scene/material.h"
@@ -459,6 +460,204 @@ inline Scene build_mesh_scene() {
 
     auto glass = std::make_shared<Dielectric>(1.5f);
     scene.objects.push_back(std::make_shared<Sphere>(Vec3(0.0f, 0.5f, 0.8f), 0.5f, glass));
+
+    return scene;
+}
+
+inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../assets/textures/Starry_Night.jpg") {
+    Scene scene;
+
+    auto add_box = [&](const Vec3& bmin, const Vec3& bmax, const MaterialPtr& mat) {
+        const float dx = bmax.x - bmin.x;
+        const float dy = bmax.y - bmin.y;
+        const float dz = bmax.z - bmin.z;
+
+        scene.objects.push_back(std::make_shared<Quad>(
+            Vec3(bmax.x, bmin.y, bmin.z), Vec3(0.0f, dy, 0.0f), Vec3(0.0f, 0.0f, dz), mat));  // +X
+        scene.objects.push_back(std::make_shared<Quad>(
+            Vec3(bmin.x, bmin.y, bmin.z), Vec3(0.0f, 0.0f, dz), Vec3(0.0f, dy, 0.0f), mat));  // -X
+        scene.objects.push_back(std::make_shared<Quad>(
+            Vec3(bmin.x, bmax.y, bmin.z), Vec3(0.0f, 0.0f, dz), Vec3(dx, 0.0f, 0.0f), mat));  // +Y
+        scene.objects.push_back(std::make_shared<Quad>(
+            Vec3(bmin.x, bmin.y, bmin.z), Vec3(dx, 0.0f, 0.0f), Vec3(0.0f, 0.0f, dz), mat));  // -Y
+        scene.objects.push_back(std::make_shared<Quad>(
+            Vec3(bmin.x, bmin.y, bmax.z), Vec3(dx, 0.0f, 0.0f), Vec3(0.0f, dy, 0.0f), mat));  // +Z
+        scene.objects.push_back(std::make_shared<Quad>(
+            Vec3(bmin.x, bmin.y, bmin.z), Vec3(0.0f, dy, 0.0f), Vec3(dx, 0.0f, 0.0f), mat));  // -Z
+    };
+
+    auto wall_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.76f, 0.74f, 0.72f)));
+    auto floor_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.62f, 0.47f, 0.30f)),
+        /*metallic_factor=*/0.0f,
+        /*metallic_tex=*/nullptr,
+        /*roughness_factor=*/0.35f,
+        /*roughness_tex=*/nullptr,
+        /*normal_map=*/nullptr,
+        /*normal_strength=*/1.0f);
+    auto wood_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.58f, 0.44f, 0.28f)),
+        /*metallic_factor=*/0.0f,
+        /*metallic_tex=*/nullptr,
+        /*roughness_factor=*/0.30f,
+        /*roughness_tex=*/nullptr,
+        /*normal_map=*/nullptr,
+        /*normal_strength=*/1.0f);
+    auto rug_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.55f, 0.52f, 0.48f)));
+
+    auto mural_tex = std::make_shared<ImageTexture>(
+        mural_texture_path,
+        ImageTexture::ColorSpace::sRGB,
+        /*channel=*/-1,
+        /*flip_v=*/true,
+        ImageTexture::WrapMode::ClampToEdge,
+        ImageTexture::WrapMode::ClampToEdge);
+    auto mural_mat = std::make_shared<Lambertian>(mural_tex);
+    auto window_frame_mat = std::make_shared<Metal>(
+        std::make_shared<SolidColor>(Color(0.06f, 0.06f, 0.065f)), 0.45f);
+    auto glass_mat = std::make_shared<Dielectric>(1.5f);
+
+    const float x0 = -2.0f;
+    const float x1 = 2.0f;
+    const float y0 = 0.0f;
+    const float y1 = 2.8f;
+    const float z0 = -5.0f;
+    const float z1 = 0.0f;
+
+    // Step 1: Architectural shell.
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z0), Vec3(x1 - x0, 0.0f, 0.0f), Vec3(0.0f, 0.0f, z1 - z0), floor_mat));  // floor
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y1, z0), Vec3(x1 - x0, 0.0f, 0.0f), Vec3(0.0f, 0.0f, z1 - z0), wall_mat));  // ceiling
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z1), Vec3(0.0f, 0.0f, z0 - z1), Vec3(0.0f, y1 - y0, 0.0f), wall_mat));  // left wall
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x1, y0, z0), Vec3(0.0f, 0.0f, z1 - z0), Vec3(0.0f, y1 - y0, 0.0f), wall_mat));  // right wall
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z1), Vec3(x1 - x0, 0.0f, 0.0f), Vec3(0.0f, y1 - y0, 0.0f), wall_mat));  // entrance wall
+
+    // Step 2: Window wall at z = -5 with a big opening.
+    const float window_x0 = -1.6f;
+    const float window_x1 = 1.6f;
+    const float window_y0 = 0.4f;
+    const float window_y1 = 2.4f;
+
+    // Wall segments (all on z = -5).
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z0), Vec3(x1 - x0, 0.0f, 0.0f), Vec3(0.0f, window_y0 - y0, 0.0f), wall_mat));  // bottom
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, window_y1, z0), Vec3(x1 - x0, 0.0f, 0.0f), Vec3(0.0f, y1 - window_y1, 0.0f), wall_mat));  // top
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, window_y0, z0), Vec3(window_x0 - x0, 0.0f, 0.0f), Vec3(0.0f, window_y1 - window_y0, 0.0f), wall_mat));  // left
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(window_x1, window_y0, z0), Vec3(x1 - window_x1, 0.0f, 0.0f), Vec3(0.0f, window_y1 - window_y0, 0.0f), wall_mat));  // right
+
+    // Frame (procedural cuboids).
+    const float frame_thickness = 0.08f;
+    const float frame_depth = 0.05f;
+    const float frame_z0 = z0;
+    const float frame_z1 = z0 + frame_depth;
+
+    add_box(Vec3(window_x0, window_y0, frame_z0),
+            Vec3(window_x0 + frame_thickness, window_y1, frame_z1),
+            window_frame_mat);  // left
+    add_box(Vec3(window_x1 - frame_thickness, window_y0, frame_z0),
+            Vec3(window_x1, window_y1, frame_z1),
+            window_frame_mat);  // right
+    add_box(Vec3(window_x0, window_y0, frame_z0),
+            Vec3(window_x1, window_y0 + frame_thickness, frame_z1),
+            window_frame_mat);  // bottom
+    add_box(Vec3(window_x0, window_y1 - frame_thickness, frame_z0),
+            Vec3(window_x1, window_y1, frame_z1),
+            window_frame_mat);  // top
+
+    // Glass (thin quad slightly inside the room).
+    const float glass_z = z0 + 0.02f;
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(window_x0, window_y0, glass_z),
+        Vec3(window_x1 - window_x0, 0.0f, 0.0f),
+        Vec3(0.0f, window_y1 - window_y0, 0.0f),
+        glass_mat));
+
+    // Step 3: Furniture blockout + mural.
+
+    // Bed platform (2.10 x 1.70 x 0.35 m).
+    add_box(Vec3(0.05f, 0.0f, -4.05f),
+            Vec3(1.75f, 0.35f, -1.95f),
+            wood_mat);
+
+    // Headboard (1.70 x 0.08 x 1.10 m).
+    add_box(Vec3(0.05f, 0.0f, -4.13f),
+            Vec3(1.75f, 1.10f, -4.05f),
+            wood_mat);
+
+    // Nightstands (0.45 x 0.40 x 0.45 m).
+    add_box(Vec3(1.325f, 0.0f, -4.05f),
+            Vec3(1.775f, 0.45f, -3.65f),
+            wood_mat);
+    add_box(Vec3(0.025f, 0.0f, -4.05f),
+            Vec3(0.475f, 0.45f, -3.65f),
+            wood_mat);
+
+    // Rug (quad).
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(-0.2f, 0.001f, -4.2f),
+        Vec3(2.4f, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, 1.8f),
+        rug_mat));
+
+    // Wall art (mural texture) on left wall.
+    const float art_x = -1.99f;
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(art_x, 1.0f, -2.2f),
+        Vec3(0.0f, 0.0f, -1.2f),
+        Vec3(0.0f, 0.8f, 0.0f),
+        mural_mat));
+
+    // Step 5.2: Practical lights (warm interior lamps).
+    auto lamp_light_mat = std::make_shared<DiffuseLight>(
+        std::make_shared<SolidColor>(Color(5.0f, 4.0f, 3.0f)));
+
+    const float lamp_y = 0.75f;
+    const float lamp_size = 0.16f;
+
+    auto add_lamp = [&](float x, float z) {
+        auto lamp = std::make_shared<Quad>(
+            Vec3(x - 0.5f * lamp_size, lamp_y, z - 0.5f * lamp_size),
+            Vec3(lamp_size, 0.0f, 0.0f),
+            Vec3(0.0f, 0.0f, lamp_size),
+            lamp_light_mat);
+        scene.objects.push_back(lamp);
+        scene.lights.add_area_light(lamp);
+    };
+
+    add_lamp(1.55f, -3.85f);
+    add_lamp(0.25f, -3.85f);
+
+    // Step 9: "Quality per dollar" improvements (baseboard + simple props).
+    const float baseboard_h = 0.10f;
+    const float baseboard_t = 0.02f;
+
+    // Left wall baseboard.
+    add_box(Vec3(x0, 0.0f, z0), Vec3(x0 + baseboard_t, baseboard_h, z1), wood_mat);
+    // Right wall baseboard.
+    add_box(Vec3(x1 - baseboard_t, 0.0f, z0), Vec3(x1, baseboard_h, z1), wood_mat);
+    // Entrance wall baseboard (extends into room).
+    add_box(Vec3(x0, 0.0f, z1 - baseboard_t), Vec3(x1, baseboard_h, z1), wood_mat);
+    // Window wall baseboard (extends into room).
+    add_box(Vec3(x0, 0.0f, z0), Vec3(x1, baseboard_h, z0 + baseboard_t), wood_mat);
+
+    auto book_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.18f, 0.22f, 0.35f)));
+    add_box(Vec3(0.10f, 0.45f, -3.95f),
+            Vec3(0.35f, 0.48f, -3.70f),
+            book_mat);
+
+    auto mug_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.85f, 0.85f, 0.85f)));
+    scene.objects.push_back(std::make_shared<Sphere>(Vec3(1.55f, 0.49f, -3.78f), 0.04f, mug_mat));
 
     return scene;
 }

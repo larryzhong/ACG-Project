@@ -27,8 +27,8 @@ void print_usage(const char* exe) {
     std::cerr
         << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
         << "Options:\n"
-        << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh|gltf)\n"
-        << "  --gltf <path>            glTF file to load for scene 'gltf'\n"
+        << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
+        << "  --gltf <path>            glTF file to load (scene 'gltf' or plant in 'hotel')\n"
         << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
         << "  --width <int>            Image width\n"
         << "  --height <int>           Image height\n"
@@ -92,6 +92,8 @@ int main(int argc, char** argv) {
     int height = 225;
     int samples_per_pixel = 16;
     int max_depth = 5;
+    bool samples_per_pixel_set = false;
+    bool max_depth_set = false;
     float aperture = 0.0f;
     float focus_dist = 0.0f;
     float shutter_open = 0.0f;
@@ -179,6 +181,7 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid --spp value.\n";
                 return 1;
             }
+            samples_per_pixel_set = true;
         } else if (arg == "--max-depth") {
             if (i + 1 >= argc) {
                 missing_value(1);
@@ -188,6 +191,7 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid --max-depth value.\n";
                 return 1;
             }
+            max_depth_set = true;
         } else if (arg == "--aperture") {
             if (i + 1 >= argc) {
                 missing_value(1);
@@ -392,6 +396,71 @@ int main(int argc, char** argv) {
         cam_settings.look_from = Vec3(0.0f, 1.6f, 3.5f);
         cam_settings.look_at = Vec3(0.0f, 0.7f, -1.0f);
         cam_settings.vertical_fov_deg = 35.0f;
+    }
+    else if (scene_name == "hotel") {
+        scene = build_hotel_room_scene();
+        if (env_path.empty()) {
+            env_path = "../assets/hdri/venice_sunset_4k.hdr";
+        }
+        if (!samples_per_pixel_set) {
+            samples_per_pixel = 128;
+        }
+        if (!max_depth_set) {
+            max_depth = 8;
+        }
+
+        std::vector<GltfMeshInstance> plant_meshes;
+        std::string gltf_err;
+        GltfLoadOptions gltf_options;
+        if (!load_gltf_meshes(gltf_path, plant_meshes, &gltf_err, gltf_options)) {
+            std::cerr << "Failed to load plant glTF: " << gltf_path << "\n";
+            if (!gltf_err.empty()) {
+                std::cerr << gltf_err << "\n";
+            }
+            return 1;
+        }
+
+        bool has_bounds = false;
+        AABB bounds;
+        for (const auto& inst : plant_meshes) {
+            if (!inst.data) {
+                continue;
+            }
+            const AABB inst_bounds = transform_aabb(inst.data->bounding_box(), inst.transform);
+            if (!has_bounds) {
+                bounds = inst_bounds;
+                has_bounds = true;
+            } else {
+                bounds = surrounding_box(bounds, inst_bounds);
+            }
+        }
+
+        if (!has_bounds) {
+            std::cerr << "Plant glTF contained no mesh data: " << gltf_path << "\n";
+            return 1;
+        }
+
+        const float height = bounds.max.y - bounds.min.y;
+        const float target_height = 1.25f;
+        const float scale = (height > 1e-6f) ? (target_height / height) : 1.0f;
+
+        const Vec3 pivot((bounds.min.x + bounds.max.x) * 0.5f, bounds.min.y, (bounds.min.z + bounds.max.z) * 0.5f);
+        const Vec3 target_pos(-1.2f, 0.0f, -4.55f);
+        const Transform plant_transform =
+            Transform::translate(target_pos) *
+            Transform::uniform_scale(scale) *
+            Transform::translate(-pivot);
+
+        for (const auto& inst : plant_meshes) {
+            if (!inst.data || !inst.material) {
+                continue;
+            }
+            scene.objects.push_back(std::make_shared<Mesh>(inst.data, plant_transform * inst.transform, inst.material));
+        }
+
+        cam_settings.look_from = Vec3(0.0f, 1.45f, -0.6f);
+        cam_settings.look_at = Vec3(0.0f, 1.35f, -4.6f);
+        cam_settings.vertical_fov_deg = 45.0f;
     }
     else if (scene_name == "gltf") {
         auto ground_mat = std::make_shared<Lambertian>(
