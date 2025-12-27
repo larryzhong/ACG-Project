@@ -12,6 +12,7 @@
 #include "core/rng.h"
 #include "core/vec3.h"
 #include "io/image_io.h"
+#include "io/gltf_loader.h"
 #include "io/simple_scene_builder.h"
 #include "render/film.h"
 #include "render/path_tracer.h"
@@ -26,7 +27,8 @@ void print_usage(const char* exe) {
     std::cerr
         << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
         << "Options:\n"
-        << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh)\n"
+        << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh|gltf)\n"
+        << "  --gltf <path>            glTF file to load for scene 'gltf'\n"
         << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
         << "  --width <int>            Image width\n"
         << "  --height <int>           Image height\n"
@@ -96,6 +98,7 @@ int main(int argc, char** argv) {
     float shutter_close = 1.0f;
     std::string output = "basic_materials.ppm";
     std::string scene_name = "simple";
+    std::string gltf_path = "../assets/models/potted_plant/potted_plant_02_4k.gltf";
     std::string env_path;
     bool hide_env_bg = false;
     bool turntable_mode = false;
@@ -153,6 +156,12 @@ int main(int argc, char** argv) {
                 return 1;
             }
             scene_name = argv[++i];
+        } else if (arg == "--gltf") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            gltf_path = argv[++i];
         } else if (arg == "--env") {
             if (i + 1 >= argc) {
                 missing_value(1);
@@ -382,6 +391,38 @@ int main(int argc, char** argv) {
         scene = build_mesh_scene();
         cam_settings.look_from = Vec3(0.0f, 1.6f, 3.5f);
         cam_settings.look_at = Vec3(0.0f, 0.7f, -1.0f);
+        cam_settings.vertical_fov_deg = 35.0f;
+    }
+    else if (scene_name == "gltf") {
+        auto ground_mat = std::make_shared<Lambertian>(
+            std::make_shared<SolidColor>(Color(0.75f, 0.75f, 0.75f)));
+        scene.objects.push_back(std::make_shared<Quad>(
+            Vec3(-2.0f, 0.0f, -2.0f), Vec3(4.0f, 0.0f, 0.0f), Vec3(0.0f, 0.0f, 4.0f), ground_mat));
+
+        auto back_mat = std::make_shared<Lambertian>(
+            std::make_shared<SolidColor>(Color(0.85f, 0.85f, 0.85f)));
+        scene.objects.push_back(std::make_shared<Quad>(
+            Vec3(-2.0f, 0.0f, -2.0f), Vec3(4.0f, 0.0f, 0.0f), Vec3(0.0f, 3.0f, 0.0f), back_mat));
+
+        auto light_mat = std::make_shared<DiffuseLight>(
+            std::make_shared<SolidColor>(Color(25.0f, 25.0f, 25.0f)));
+        auto light = std::make_shared<Quad>(
+            Vec3(-0.7f, 2.0f, -0.7f), Vec3(1.4f, 0.0f, 0.0f), Vec3(0.0f, 0.0f, 1.4f), light_mat);
+        scene.objects.push_back(light);
+        scene.lights.add_area_light(light);
+
+        std::string gltf_err;
+        GltfLoadOptions gltf_options;
+        if (!append_gltf_to_scene(gltf_path, scene, Transform::identity(), &gltf_err, gltf_options)) {
+            std::cerr << "Failed to load glTF: " << gltf_path << "\n";
+            if (!gltf_err.empty()) {
+                std::cerr << gltf_err << "\n";
+            }
+            return 1;
+        }
+
+        cam_settings.look_from = Vec3(0.0f, 0.55f, 1.6f);
+        cam_settings.look_at = Vec3(0.0f, 0.45f, 0.0f);
         cam_settings.vertical_fov_deg = 35.0f;
     }
     else {
