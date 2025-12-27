@@ -121,6 +121,11 @@ int main(int argc, char** argv) {
         GltfLoadOptions options;
         options.use_first_camera = use_gltf_camera;
         std::string gltf_error;
+        if (!use_gltf_camera) {
+            cam_settings.look_from = look_from_override;
+            cam_settings.look_at = look_at_override;
+            cam_settings.up = up_override;
+        }
         if (!load_gltf_scene(gltf_path, scene, &cam_settings, &gltf_error, options)) {
             std::cerr << "Failed to load glTF: " << gltf_path << "\n";
             if (!gltf_error.empty()) {
@@ -205,11 +210,6 @@ int main(int argc, char** argv) {
 
     scene.build_bvh();
 
-    if (!use_gltf_camera) {
-        cam_settings.look_from = look_from_override;
-        cam_settings.look_at = look_at_override;
-        cam_settings.up = up_override;
-    }
     cam_settings.aperture = aperture;
     cam_settings.t0 = shutter_open;
     cam_settings.t1 = shutter_close;
