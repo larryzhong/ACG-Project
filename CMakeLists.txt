@@ -8,7 +8,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(pathtracer
     src/main.cpp
-    src/io/gltf_loader.cpp
     src/io/obj_loader.cpp
     src/scene/environment.cpp
 )

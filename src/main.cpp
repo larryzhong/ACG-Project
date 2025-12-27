@@ -12,7 +12,6 @@
 #include "core/rng.h"
 #include "core/vec3.h"
 #include "io/image_io.h"
-#include "io/gltf_loader.h"
 #include "io/simple_scene_builder.h"
 #include "render/film.h"
 #include "render/path_tracer.h"
@@ -28,8 +27,6 @@ void print_usage(const char* exe) {
         << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
         << "Options:\n"
         << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh)\n"
-        << "  --gltf <path>            Load glTF scene (.gltf/.glb)\n"
-        << "  --gltf-camera            Use first glTF camera if present\n"
         << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
         << "  --width <int>            Image width\n"
         << "  --height <int>           Image height\n"
@@ -99,9 +96,7 @@ int main(int argc, char** argv) {
     float shutter_close = 1.0f;
     std::string output = "basic_materials.ppm";
     std::string scene_name = "simple";
-    std::string gltf_path;
     std::string env_path;
-    bool use_gltf_camera = false;
     bool hide_env_bg = false;
     bool turntable_mode = false;
     int turntable_frames = 60;
@@ -158,12 +153,6 @@ int main(int argc, char** argv) {
                 return 1;
             }
             scene_name = argv[++i];
-        } else if (arg == "--gltf") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            gltf_path = argv[++i];
         } else if (arg == "--env") {
             if (i + 1 >= argc) {
                 missing_value(1);
@@ -271,8 +260,6 @@ int main(int argc, char** argv) {
             }
             turntable_center = Vec3(cx, cy, cz);
             turntable_center_set = true;
-        } else if (arg == "--gltf-camera") {
-            use_gltf_camera = true;
         } else if (arg == "--look-from") {
             if (i + 3 >= argc) {
                 missing_value(3);
@@ -346,19 +333,7 @@ int main(int argc, char** argv) {
     cam_settings.image_width = width;
     cam_settings.image_height = height;
     
-    if (!gltf_path.empty()) {
-        GltfLoadOptions options;
-        options.use_first_camera = use_gltf_camera;
-        std::string gltf_error;
-        if (!load_gltf_scene(gltf_path, scene, &cam_settings, &gltf_error, options)) {
-            std::cerr << "Failed to load glTF: " << gltf_path << "\n";
-            if (!gltf_error.empty()) {
-                std::cerr << gltf_error << "\n";
-            }
-            return 1;
-        }
-        scene_name = gltf_path;
-    } else if (scene_name == "simple") {
+    if (scene_name == "simple") {
         scene = build_simple_scene_basic();
         cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
         cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
