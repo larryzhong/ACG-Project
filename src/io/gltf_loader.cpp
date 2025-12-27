@@ -544,6 +544,78 @@ static void compute_normals(const std::vector<Vec3>& positions,
     }
 }
 
+static void compute_tangents(const std::vector<Vec3>& positions,
+                             const std::vector<Vec3>& normals,
+                             const std::vector<Vec2>& uvs,
+                             const std::vector<std::uint32_t>& indices,
+                             std::vector<Vec3>& tangents_out,
+                             std::vector<float>& signs_out) {
+    tangents_out.assign(positions.size(), Vec3(0.0f));
+    std::vector<Vec3> bitangents(positions.size(), Vec3(0.0f));
+    signs_out.assign(positions.size(), 1.0f);
+
+    const std::size_t tri_count = indices.size() / 3;
+    for (std::size_t t = 0; t < tri_count; ++t) {
+        const std::uint32_t i0 = indices[3 * t + 0];
+        const std::uint32_t i1 = indices[3 * t + 1];
+        const std::uint32_t i2 = indices[3 * t + 2];
+        if (i0 >= positions.size() || i1 >= positions.size() || i2 >= positions.size()) {
+            continue;
+        }
+
+        const Vec3& p0 = positions[i0];
+        const Vec3& p1 = positions[i1];
+        const Vec3& p2 = positions[i2];
+
+        const Vec2& uv0 = uvs[i0];
+        const Vec2& uv1 = uvs[i1];
+        const Vec2& uv2 = uvs[i2];
+
+        const Vec3 e1 = p1 - p0;
+        const Vec3 e2 = p2 - p0;
+
+        const Vec2 d1 = uv1 - uv0;
+        const Vec2 d2 = uv2 - uv0;
+
+        const float det = d1.x * d2.y - d1.y * d2.x;
+        if (std::fabs(det) < 1e-8f) {
+            continue;
+        }
+
+        const float r = 1.0f / det;
+        const Vec3 tangent   = (e1 * d2.y - e2 * d1.y) * r;
+        const Vec3 bitangent = (e2 * d1.x - e1 * d2.x) * r;
+
+        tangents_out[i0] += tangent;
+        tangents_out[i1] += tangent;
+        tangents_out[i2] += tangent;
+
+        bitangents[i0] += bitangent;
+        bitangents[i1] += bitangent;
+        bitangents[i2] += bitangent;
+    }
+
+    for (std::size_t i = 0; i < positions.size(); ++i) {
+        const Vec3 n = normals[i];
+
+        Vec3 t = tangents_out[i];
+        t = t - n * dot(n, t);
+
+        if (t.length_squared() > 1e-20f) {
+            t = normalize(t);
+        } else {
+            const Vec3 a = (std::fabs(n.x) < 0.9f) ? Vec3(1.0f, 0.0f, 0.0f) : Vec3(0.0f, 1.0f, 0.0f);
+            t = normalize(cross(a, n));
+        }
+
+        const Vec3 b = bitangents[i];
+        const float s = (dot(cross(n, t), b) < 0.0f) ? -1.0f : 1.0f;
+
+        tangents_out[i] = t;
+        signs_out[i] = s;
+    }
+}
+
 static TexturePtr load_texture(const tinygltf::Model& model,
                                int texture_index,
                                const std::filesystem::path& base_dir,
@@ -984,6 +1056,10 @@ static MeshDataPtr build_mesh_data(const tinygltf::Model& model,
 
     if (normals.size() != positions.size()) {
         compute_normals(positions, indices, normals);
+    }
+
+    if (tangents.empty() || tangent_signs.empty()) {
+        compute_tangents(positions, normals, uvs, indices, tangents, tangent_signs);
     }
 
     return std::make_shared<MeshData>(
