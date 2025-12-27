@@ -3,6 +3,8 @@
 #include <string>
 #include <iomanip>
 #include <sstream>
+#include <cerrno>
+#include <limits>
 
 #include "camera/camera.h"
 #include "core/color.h"
@@ -18,6 +20,73 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "io/stb_image.h"
+
+namespace {
+
+void print_usage(const char* exe) {
+    std::cerr
+        << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
+        << "Options:\n"
+        << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh)\n"
+        << "  --gltf <path>            Load glTF scene (.gltf/.glb)\n"
+        << "  --gltf-camera            Use first glTF camera if present\n"
+        << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
+        << "  --width <int>            Image width\n"
+        << "  --height <int>           Image height\n"
+        << "  --spp <int>              Samples per pixel\n"
+        << "  --max-depth <int>        Path tracer max depth\n"
+        << "  --env <path>             HDR environment map\n"
+        << "  --hide-env-bg            Hide environment background (still lights the scene)\n"
+        << "  --aperture <float>       Aperture diameter (0 disables DOF)\n"
+        << "  --focus-dist <float>     Focus distance (<=0 uses |look_from-look_at|)\n"
+        << "  --shutter-open <float>   Shutter open time\n"
+        << "  --shutter-close <float>  Shutter close time\n"
+        << "  --look-from x y z        Override camera position\n"
+        << "  --look-at x y z          Override camera target\n"
+        << "  --up x y z               Override camera up vector\n"
+        << "  --turntable              Render turntable animation\n"
+        << "  --frames <int>           Turntable frames\n"
+        << "  --turntable-radius <f>   Turntable radius (XZ plane)\n"
+        << "  --turntable-height <f>   Turntable height (Y)\n"
+        << "  --turntable-center x y z Turntable center\n"
+        << "  --help                   Show this help\n";
+}
+
+bool parse_int_arg(const char* text, int& out) {
+    if (!text) {
+        return false;
+    }
+    char* end = nullptr;
+    errno = 0;
+    const long v = std::strtol(text, &end, 10);
+    if (errno != 0 || end == text || *end != '\0') {
+        return false;
+    }
+    if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) {
+        return false;
+    }
+    out = static_cast<int>(v);
+    return true;
+}
+
+bool parse_float_arg(const char* text, float& out) {
+    if (!text) {
+        return false;
+    }
+    char* end = nullptr;
+    errno = 0;
+    const float v = std::strtof(text, &end);
+    if (errno != 0 || end == text || *end != '\0') {
+        return false;
+    }
+    if (!std::isfinite(v)) {
+        return false;
+    }
+    out = v;
+    return true;
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
     int width = 400;
@@ -39,72 +108,232 @@ int main(int argc, char** argv) {
     float turntable_radius = 0.0f;
     float turntable_height = 0.0f;
     Vec3 turntable_center(0.0f, 0.0f, 0.0f);
+    bool turntable_radius_set = false;
+    bool turntable_height_set = false;
+    bool turntable_center_set = false;
     Vec3 look_from_override(0.0f);
     Vec3 look_at_override(0.0f);
     Vec3 up_override(0.0f, 1.0f, 0.0f);
-    bool override_camera = false;
+    bool look_from_set = false;
+    bool look_at_set = false;
+    bool up_set = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--output" && i + 1 < argc) {
+        auto missing_value = [&](int needed) {
+            std::cerr << "Missing value for " << arg << " (need " << needed << " argument(s)).\n";
+            print_usage(argv[0]);
+        };
+
+        if (arg == "--help" || arg == "-h") {
+            print_usage(argv[0]);
+            return 0;
+        } else if (arg == "--output") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
             output = argv[++i];
-        } else if (arg == "--width" && i + 1 < argc) {
-            width = std::atoi(argv[++i]);
-        } else if (arg == "--height" && i + 1 < argc) {
-            height = std::atoi(argv[++i]);
-        } else if (arg == "--scene" && i + 1 < argc) {
+        } else if (arg == "--width") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_int_arg(argv[++i], width)) {
+                std::cerr << "Invalid --width value.\n";
+                return 1;
+            }
+        } else if (arg == "--height") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_int_arg(argv[++i], height)) {
+                std::cerr << "Invalid --height value.\n";
+                return 1;
+            }
+        } else if (arg == "--scene") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
             scene_name = argv[++i];
-        } else if (arg == "--gltf" && i + 1 < argc) {
+        } else if (arg == "--gltf") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
             gltf_path = argv[++i];
-        } else if (arg == "--env" && i + 1 < argc) {
+        } else if (arg == "--env") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
             env_path = argv[++i];
         } else if (arg == "--hide-env-bg") {
             hide_env_bg = true;
-        } else if (arg == "--spp" && i + 1 < argc) {
-            samples_per_pixel = std::atoi(argv[++i]);
-        } else if (arg == "--max-depth" && i + 1 < argc) {
-            max_depth = std::atoi(argv[++i]);
-        } else if (arg == "--aperture" && i + 1 < argc) {
-            aperture = static_cast<float>(std::atof(argv[++i]));
-        } else if (arg == "--focus-dist" && i + 1 < argc) {
-            focus_dist = static_cast<float>(std::atof(argv[++i]));
-        } else if (arg == "--shutter-open" && i + 1 < argc) {
-            shutter_open = static_cast<float>(std::atof(argv[++i]));
-        } else if (arg == "--shutter-close" && i + 1 < argc) {
-            shutter_close = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--spp") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_int_arg(argv[++i], samples_per_pixel)) {
+                std::cerr << "Invalid --spp value.\n";
+                return 1;
+            }
+        } else if (arg == "--max-depth") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_int_arg(argv[++i], max_depth)) {
+                std::cerr << "Invalid --max-depth value.\n";
+                return 1;
+            }
+        } else if (arg == "--aperture") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], aperture)) {
+                std::cerr << "Invalid --aperture value.\n";
+                return 1;
+            }
+        } else if (arg == "--focus-dist") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], focus_dist)) {
+                std::cerr << "Invalid --focus-dist value.\n";
+                return 1;
+            }
+        } else if (arg == "--shutter-open") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], shutter_open)) {
+                std::cerr << "Invalid --shutter-open value.\n";
+                return 1;
+            }
+        } else if (arg == "--shutter-close") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], shutter_close)) {
+                std::cerr << "Invalid --shutter-close value.\n";
+                return 1;
+            }
         } else if (arg == "--turntable") {
             turntable_mode = true;
-        } else if (arg == "--frames" && i + 1 < argc) {
-            turntable_frames = std::atoi(argv[++i]);
-        } else if (arg == "--turntable-radius" && i + 1 < argc) {
-            turntable_radius = static_cast<float>(std::atof(argv[++i]));
-        } else if (arg == "--turntable-height" && i + 1 < argc) {
-            turntable_height = static_cast<float>(std::atof(argv[++i]));
-        } else if (arg == "--turntable-center" && i + 3 < argc) {
-            float cx = static_cast<float>(std::atof(argv[++i]));
-            float cy = static_cast<float>(std::atof(argv[++i]));
-            float cz = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--frames") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_int_arg(argv[++i], turntable_frames)) {
+                std::cerr << "Invalid --frames value.\n";
+                return 1;
+            }
+        } else if (arg == "--turntable-radius") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], turntable_radius)) {
+                std::cerr << "Invalid --turntable-radius value.\n";
+                return 1;
+            }
+            turntable_radius_set = true;
+        } else if (arg == "--turntable-height") {
+            if (i + 1 >= argc) {
+                missing_value(1);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], turntable_height)) {
+                std::cerr << "Invalid --turntable-height value.\n";
+                return 1;
+            }
+            turntable_height_set = true;
+        } else if (arg == "--turntable-center") {
+            if (i + 3 >= argc) {
+                missing_value(3);
+                return 1;
+            }
+            float cx, cy, cz;
+            if (!parse_float_arg(argv[++i], cx) ||
+                !parse_float_arg(argv[++i], cy) ||
+                !parse_float_arg(argv[++i], cz)) {
+                std::cerr << "Invalid --turntable-center value(s).\n";
+                return 1;
+            }
             turntable_center = Vec3(cx, cy, cz);
+            turntable_center_set = true;
         } else if (arg == "--gltf-camera") {
             use_gltf_camera = true;
-        } else if (arg == "--look-from" && i + 3 < argc) {
-            look_from_override.x = static_cast<float>(std::atof(argv[++i]));
-            look_from_override.y = static_cast<float>(std::atof(argv[++i]));
-            look_from_override.z = static_cast<float>(std::atof(argv[++i]));
-            override_camera = true;
-        } else if (arg == "--look-at" && i + 3 < argc) {
-            look_at_override.x = static_cast<float>(std::atof(argv[++i]));
-            look_at_override.y = static_cast<float>(std::atof(argv[++i]));
-            look_at_override.z = static_cast<float>(std::atof(argv[++i]));
-        } else if (arg == "--up" && i + 3 < argc) {
-            up_override.x = static_cast<float>(std::atof(argv[++i]));
-            up_override.y = static_cast<float>(std::atof(argv[++i]));
-            up_override.z = static_cast<float>(std::atof(argv[++i]));
+        } else if (arg == "--look-from") {
+            if (i + 3 >= argc) {
+                missing_value(3);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], look_from_override.x) ||
+                !parse_float_arg(argv[++i], look_from_override.y) ||
+                !parse_float_arg(argv[++i], look_from_override.z)) {
+                std::cerr << "Invalid --look-from value(s).\n";
+                return 1;
+            }
+            look_from_set = true;
+        } else if (arg == "--look-at") {
+            if (i + 3 >= argc) {
+                missing_value(3);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], look_at_override.x) ||
+                !parse_float_arg(argv[++i], look_at_override.y) ||
+                !parse_float_arg(argv[++i], look_at_override.z)) {
+                std::cerr << "Invalid --look-at value(s).\n";
+                return 1;
+            }
+            look_at_set = true;
+        } else if (arg == "--up") {
+            if (i + 3 >= argc) {
+                missing_value(3);
+                return 1;
+            }
+            if (!parse_float_arg(argv[++i], up_override.x) ||
+                !parse_float_arg(argv[++i], up_override.y) ||
+                !parse_float_arg(argv[++i], up_override.z)) {
+                std::cerr << "Invalid --up value(s).\n";
+                return 1;
+            }
+            up_set = true;
+        } else {
+            std::cerr << "Unknown argument: " << arg << "\n";
+            print_usage(argv[0]);
+            return 1;
         }
     }
 
     if (width <= 0 || height <= 0 || samples_per_pixel <= 0 || max_depth <= 0) {
         std::cerr << "Invalid render parameters.\n";
+        return 1;
+    }
+    if (aperture < 0.0f) {
+        std::cerr << "Invalid --aperture value (must be >= 0).\n";
+        return 1;
+    }
+    if (shutter_close < shutter_open) {
+        std::cerr << "Invalid shutter interval (--shutter-close must be >= --shutter-open).\n";
+        return 1;
+    }
+    if (turntable_mode && turntable_frames <= 0) {
+        std::cerr << "Invalid --frames value (must be > 0).\n";
+        return 1;
+    }
+    if (turntable_radius_set && turntable_radius <= 0.0f) {
+        std::cerr << "Invalid --turntable-radius value (must be > 0).\n";
         return 1;
     }
 
@@ -121,11 +350,6 @@ int main(int argc, char** argv) {
         GltfLoadOptions options;
         options.use_first_camera = use_gltf_camera;
         std::string gltf_error;
-        if (!use_gltf_camera) {
-            cam_settings.look_from = look_from_override;
-            cam_settings.look_at = look_at_override;
-            cam_settings.up = up_override;
-        }
         if (!load_gltf_scene(gltf_path, scene, &cam_settings, &gltf_error, options)) {
             std::cerr << "Failed to load glTF: " << gltf_path << "\n";
             if (!gltf_error.empty()) {
@@ -190,6 +414,25 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (look_from_set) {
+        cam_settings.look_from = look_from_override;
+    }
+    if (look_at_set) {
+        cam_settings.look_at = look_at_override;
+    }
+    if (up_set) {
+        cam_settings.up = up_override;
+    }
+
+    if ((cam_settings.look_from - cam_settings.look_at).length_squared() <= 1e-8f) {
+        std::cerr << "Invalid camera: look_from and look_at are too close.\n";
+        return 1;
+    }
+    if (cam_settings.up.length_squared() <= 1e-8f) {
+        std::cerr << "Invalid camera: up vector has near-zero length.\n";
+        return 1;
+    }
+
     if (!env_path.empty()) {
         scene.environment = std::make_shared<EnvironmentMap>();
         std::string env_error;
@@ -242,10 +485,10 @@ int main(int argc, char** argv) {
             Vec3 diff = cam_settings.look_from - cam_settings.look_at;
             turntable_radius = std::sqrt(diff.x * diff.x + diff.z * diff.z);
         }
-        if (turntable_height == 0.0f) {
+        if (!turntable_height_set) {
             turntable_height = cam_settings.look_from.y;
         }
-        if (turntable_center.length_squared() == 0.0f) {
+        if (!turntable_center_set) {
             turntable_center = cam_settings.look_at;
         }
 
