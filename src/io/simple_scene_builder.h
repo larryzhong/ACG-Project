@@ -741,9 +741,9 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     // Decorative wall art on right wall (normal points -X into the room)
     const float art_x = x1 - 0.01f;
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(art_x, 1.35f, -3.90f),
+        Vec3(art_x, 1.35f, -5.50f),
+        Vec3(0.0f, 0.0f, 1.60f),
         Vec3(0.0f, 1.10f, 0.0f),
-        Vec3(0.0f, 0.0f, -1.60f),
         mural_mat));
 
     // -------------------------
