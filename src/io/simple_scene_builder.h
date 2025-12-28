@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cmath>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "core/color.h"
 #include "scene/material.h"
@@ -665,24 +667,83 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     add_box(Vec3(3.40f, 0.0f, -3.25f), Vec3(3.90f, 0.45f, -2.75f), wood_mat); // near (camera side)
     add_box(Vec3(3.40f, 0.0f, -7.25f), Vec3(3.90f, 0.45f, -6.75f), wood_mat); // far (window side)
 
-    // Bedside lamps (warm)
+    // Bedside lamps (warm): shade + glowing bulb (sphere)
     auto bedside_light_mat = std::make_shared<DiffuseLight>(
         std::make_shared<SolidColor>(Color(6.0f, 5.2f, 4.0f)));
-    const float lamp_y = 0.78f;
-    const float lamp_s = 0.18f;
 
-    auto add_lamp = [&](float cx, float cz) {
-        auto lamp = std::make_shared<Quad>(
-            Vec3(cx - 0.5f * lamp_s, lamp_y, cz - 0.5f * lamp_s),
-            Vec3(lamp_s, 0.0f, 0.0f),
-            Vec3(0.0f, 0.0f, lamp_s),
-            bedside_light_mat);
-        scene.objects.push_back(lamp);
-        scene.lights.add_area_light(lamp);
+    auto bedside_shade_tex = std::make_shared<ForceAlphaTexture>(
+        std::make_shared<SolidColor>(Color(0.88f, 0.87f, 0.84f)),
+        /*alpha=*/0.60f);
+    auto bedside_shade_mat = std::make_shared<Lambertian>(bedside_shade_tex);
+
+    auto make_open_frustum = [](int segments, float r0, float r1, float h) -> MeshDataPtr {
+        if (segments < 3) segments = 3;
+        if (r0 < 0.0f) r0 = 0.0f;
+        if (r1 < 0.0f) r1 = 0.0f;
+        if (h < 0.0f) h = 0.0f;
+
+        std::vector<Vec3> positions;
+        std::vector<Vec2> uvs;
+        std::vector<std::uint32_t> indices;
+
+        positions.reserve(static_cast<std::size_t>(2 * segments));
+        uvs.reserve(static_cast<std::size_t>(2 * segments));
+        indices.reserve(static_cast<std::size_t>(segments * 6));
+
+        for (int i = 0; i < segments; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(segments);
+            const float a = 2.0f * kPi * t;
+            positions.push_back(Vec3(r0 * std::cos(a), 0.0f, r0 * std::sin(a)));
+            uvs.push_back(Vec2(t, 0.0f));
+        }
+        for (int i = 0; i < segments; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(segments);
+            const float a = 2.0f * kPi * t;
+            positions.push_back(Vec3(r1 * std::cos(a), h, r1 * std::sin(a)));
+            uvs.push_back(Vec2(t, 1.0f));
+        }
+
+        for (int i = 0; i < segments; ++i) {
+            const int ni = (i + 1) % segments;
+            const std::uint32_t b0 = static_cast<std::uint32_t>(i);
+            const std::uint32_t b1 = static_cast<std::uint32_t>(ni);
+            const std::uint32_t t0 = static_cast<std::uint32_t>(segments + i);
+            const std::uint32_t t1 = static_cast<std::uint32_t>(segments + ni);
+
+            indices.push_back(b0);
+            indices.push_back(t0);
+            indices.push_back(t1);
+
+            indices.push_back(b0);
+            indices.push_back(t1);
+            indices.push_back(b1);
+        }
+
+        return std::make_shared<MeshData>(std::move(positions), std::vector<Vec3>{}, std::move(uvs), std::move(indices));
     };
 
-    add_lamp(3.65f, -3.00f); // near nightstand
-    add_lamp(3.65f, -7.00f); // far nightstand
+    const float bedside_shade_y0 = 0.48f;
+    const float bedside_shade_h = 0.30f;
+    const float bedside_shade_r0 = 0.18f;
+    const float bedside_shade_r1 = 0.11f;
+    const int bedside_shade_segments = 28;
+    const MeshDataPtr bedside_shade_data =
+        make_open_frustum(bedside_shade_segments, bedside_shade_r0, bedside_shade_r1, bedside_shade_h);
+
+    const float bedside_bulb_r = 0.05f;
+    const float bedside_bulb_y = bedside_shade_y0 + 0.17f;
+
+    auto add_bedside_lamp = [&](float cx, float cz) {
+        const Transform shade_tr = Transform::translate(Vec3(cx, bedside_shade_y0, cz));
+        scene.objects.push_back(std::make_shared<Mesh>(bedside_shade_data, shade_tr, bedside_shade_mat));
+
+        auto bulb = std::make_shared<Sphere>(Vec3(cx, bedside_bulb_y, cz), bedside_bulb_r, bedside_light_mat);
+        scene.objects.push_back(bulb);
+        scene.lights.add_area_light(bulb);
+    };
+
+    add_bedside_lamp(3.65f, -3.00f); // near nightstand
+    add_bedside_lamp(3.65f, -7.00f); // far nightstand
 
     // TV on left wall + low cabinet (blue), facing into the room (+X).
     add_box(Vec3(x0 + 0.10f, 0.0f, -5.65f), Vec3(x0 + 0.85f, 0.32f, -4.35f), cabinet_blue_mat);
@@ -726,25 +787,44 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     scene.objects.push_back(floorlamp);
     scene.lights.add_area_light(floorlamp);
 
-    // Ceiling pendant light (center-ish)
-    auto pendant_light_mat = std::make_shared<DiffuseLight>(
-        std::make_shared<SolidColor>(Color(12.0f, 11.0f, 9.0f)));
-
-    // Pendant rod: connect light to ceiling
+    // Ceiling pendant light (center-ish): shade + glowing bulb (sphere)
     const float rod_r = 0.03f;
     const float rod_cx = 0.0f;
     const float rod_cz = -4.75f;
-    add_box(Vec3(rod_cx - rod_r, 2.63f, rod_cz - rod_r),
-            Vec3(rod_cx + rod_r, y1,      rod_cz + rod_r),
+
+    auto pendant_shade_tex = std::make_shared<ForceAlphaTexture>(
+        std::make_shared<SolidColor>(Color(0.90f, 0.89f, 0.86f)),
+        /*alpha=*/0.70f);
+    auto pendant_shade_mat = std::make_shared<Lambertian>(pendant_shade_tex);
+
+    const float pendant_shade_y0 = 2.15f;
+    const float pendant_shade_h  = 0.50f;
+    const float pendant_shade_r0 = 0.33f;
+    const float pendant_shade_r1 = 0.18f;
+    const int pendant_shade_segments = 36;
+    const MeshDataPtr pendant_shade_data =
+        make_open_frustum(pendant_shade_segments, pendant_shade_r0, pendant_shade_r1, pendant_shade_h);
+
+    const float pendant_shade_y1 = pendant_shade_y0 + pendant_shade_h;
+
+    // Pendant rod: connect shade to ceiling
+    add_box(Vec3(rod_cx - rod_r, pendant_shade_y1, rod_cz - rod_r),
+            Vec3(rod_cx + rod_r, y1,              rod_cz + rod_r),
             metal_dark_mat);
 
-    auto pendant = std::make_shared<Quad>(
-        Vec3(-0.30f, 2.62f, -5.05f),
-        Vec3(0.60f, 0.0f, 0.0f),
-        Vec3(0.0f, 0.0f, 0.60f),
+    const Transform pendant_shade_tr = Transform::translate(Vec3(rod_cx, pendant_shade_y0, rod_cz));
+    scene.objects.push_back(std::make_shared<Mesh>(pendant_shade_data, pendant_shade_tr, pendant_shade_mat));
+
+    auto pendant_light_mat = std::make_shared<DiffuseLight>(
+        std::make_shared<SolidColor>(Color(48.0f, 44.0f, 36.0f)));
+    const float pendant_bulb_r = 0.085f;
+    const float pendant_bulb_y = pendant_shade_y0 + 0.30f;
+    auto pendant_bulb = std::make_shared<Sphere>(
+        Vec3(rod_cx, pendant_bulb_y, rod_cz),
+        pendant_bulb_r,
         pendant_light_mat);
-    scene.objects.push_back(pendant);
-    scene.lights.add_area_light(pendant);
+    scene.objects.push_back(pendant_bulb);
+    scene.lights.add_area_light(pendant_bulb);
 
     // Decorative wall art on right wall (normal points -X into the room)
     const float art_x = x1 - 0.01f;
