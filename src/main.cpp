@@ -5,6 +5,7 @@
 #include <sstream>
 #include <cerrno>
 #include <limits>
+#include <cmath>
 
 #include "camera/camera.h"
 #include "core/color.h"
@@ -23,12 +24,58 @@
 
 namespace {
 
+struct Options {
+    int width = 960;
+    int height = 540;
+    int spp = 64;
+    int max_depth = 8;
+    bool spp_set = false;
+    bool max_depth_set = false;
+
+    float aperture = 0.0f;
+    float focus_dist = 0.0f;
+    float shutter_open = 0.0f;
+    float shutter_close = 1.0f;
+
+    std::string output = "bedroom.png";
+    std::string scene_name = "hotel";
+
+    // NOTE:
+    // --gltf: for scene "gltf" -> load model into a simple test room
+    // --gltf: for scene "hotel" -> OUTSIDE model seen through the window
+    std::string gltf_path;
+
+    // New: explicit indoor plant model (optional).
+    std::string plant_gltf_path = "../assets/models/potted_plant/potted_plant_02_4k.gltf";
+
+    std::string env_path;
+    bool hide_env_bg = false;
+    bool hide_env_bg_set = false;
+
+    bool turntable = false;
+    int turntable_frames = 60;
+    float turntable_radius = 0.0f;
+    float turntable_height = 0.0f;
+    Vec3 turntable_center = Vec3(0.0f);
+    bool turntable_radius_set = false;
+    bool turntable_height_set = false;
+    bool turntable_center_set = false;
+
+    Vec3 look_from_override = Vec3(0.0f);
+    Vec3 look_at_override = Vec3(0.0f);
+    Vec3 up_override = Vec3(0.0f, 1.0f, 0.0f);
+    bool look_from_set = false;
+    bool look_at_set = false;
+    bool up_set = false;
+};
+
 void print_usage(const char* exe) {
     std::cerr
         << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
         << "Options:\n"
         << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
-        << "  --gltf <path>            glTF file to load (scene 'gltf' or plant in 'hotel')\n"
+        << "  --gltf <path>            glTF file (scene 'gltf') OR outside model (scene 'hotel')\n"
+        << "  --plant-gltf <path>      Indoor plant glTF (scene 'hotel' only)\n"
         << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
         << "  --width <int>            Image width\n"
         << "  --height <int>           Image height\n"
@@ -52,72 +99,28 @@ void print_usage(const char* exe) {
 }
 
 bool parse_int_arg(const char* text, int& out) {
-    if (!text) {
-        return false;
-    }
+    if (!text) return false;
     char* end = nullptr;
     errno = 0;
     const long v = std::strtol(text, &end, 10);
-    if (errno != 0 || end == text || *end != '\0') {
-        return false;
-    }
-    if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) {
-        return false;
-    }
+    if (errno != 0 || end == text || *end != '\0') return false;
+    if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) return false;
     out = static_cast<int>(v);
     return true;
 }
 
 bool parse_float_arg(const char* text, float& out) {
-    if (!text) {
-        return false;
-    }
+    if (!text) return false;
     char* end = nullptr;
     errno = 0;
     const float v = std::strtof(text, &end);
-    if (errno != 0 || end == text || *end != '\0') {
-        return false;
-    }
-    if (!std::isfinite(v)) {
-        return false;
-    }
+    if (errno != 0 || end == text || *end != '\0') return false;
+    if (!std::isfinite(v)) return false;
     out = v;
     return true;
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
-    int width = 400;
-    int height = 225;
-    int samples_per_pixel = 16;
-    int max_depth = 5;
-    bool samples_per_pixel_set = false;
-    bool max_depth_set = false;
-    float aperture = 0.0f;
-    float focus_dist = 0.0f;
-    float shutter_open = 0.0f;
-    float shutter_close = 1.0f;
-    std::string output = "basic_materials.ppm";
-    std::string scene_name = "simple";
-    std::string gltf_path = "../assets/models/potted_plant/potted_plant_02_4k.gltf";
-    std::string env_path;
-    bool hide_env_bg = false;
-    bool turntable_mode = false;
-    int turntable_frames = 60;
-    float turntable_radius = 0.0f;
-    float turntable_height = 0.0f;
-    Vec3 turntable_center(0.0f, 0.0f, 0.0f);
-    bool turntable_radius_set = false;
-    bool turntable_height_set = false;
-    bool turntable_center_set = false;
-    Vec3 look_from_override(0.0f);
-    Vec3 look_at_override(0.0f);
-    Vec3 up_override(0.0f, 1.0f, 0.0f);
-    bool look_from_set = false;
-    bool look_at_set = false;
-    bool up_set = false;
-
+bool parse_args(int argc, char** argv, Options& opt) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto missing_value = [&](int needed) {
@@ -127,342 +130,260 @@ int main(int argc, char** argv) {
 
         if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
-            return 0;
+            return false; // caller should exit 0
         } else if (arg == "--output") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            output = argv[++i];
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            opt.output = argv[++i];
         } else if (arg == "--width") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_int_arg(argv[++i], width)) {
-                std::cerr << "Invalid --width value.\n";
-                return 1;
-            }
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_int_arg(argv[++i], opt.width)) { std::cerr << "Invalid --width value.\n"; return false; }
         } else if (arg == "--height") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_int_arg(argv[++i], height)) {
-                std::cerr << "Invalid --height value.\n";
-                return 1;
-            }
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_int_arg(argv[++i], opt.height)) { std::cerr << "Invalid --height value.\n"; return false; }
         } else if (arg == "--scene") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            scene_name = argv[++i];
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            opt.scene_name = argv[++i];
         } else if (arg == "--gltf") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            gltf_path = argv[++i];
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            opt.gltf_path = argv[++i];
+        } else if (arg == "--plant-gltf") {
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            opt.plant_gltf_path = argv[++i];
         } else if (arg == "--env") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            env_path = argv[++i];
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            opt.env_path = argv[++i];
         } else if (arg == "--hide-env-bg") {
-            hide_env_bg = true;
+            opt.hide_env_bg = true;
+            opt.hide_env_bg_set = true;
         } else if (arg == "--spp") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_int_arg(argv[++i], samples_per_pixel)) {
-                std::cerr << "Invalid --spp value.\n";
-                return 1;
-            }
-            samples_per_pixel_set = true;
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_int_arg(argv[++i], opt.spp)) { std::cerr << "Invalid --spp value.\n"; return false; }
+            opt.spp_set = true;
         } else if (arg == "--max-depth") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_int_arg(argv[++i], max_depth)) {
-                std::cerr << "Invalid --max-depth value.\n";
-                return 1;
-            }
-            max_depth_set = true;
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_int_arg(argv[++i], opt.max_depth)) { std::cerr << "Invalid --max-depth value.\n"; return false; }
+            opt.max_depth_set = true;
         } else if (arg == "--aperture") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], aperture)) {
-                std::cerr << "Invalid --aperture value.\n";
-                return 1;
-            }
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.aperture)) { std::cerr << "Invalid --aperture value.\n"; return false; }
         } else if (arg == "--focus-dist") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], focus_dist)) {
-                std::cerr << "Invalid --focus-dist value.\n";
-                return 1;
-            }
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.focus_dist)) { std::cerr << "Invalid --focus-dist value.\n"; return false; }
         } else if (arg == "--shutter-open") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], shutter_open)) {
-                std::cerr << "Invalid --shutter-open value.\n";
-                return 1;
-            }
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.shutter_open)) { std::cerr << "Invalid --shutter-open value.\n"; return false; }
         } else if (arg == "--shutter-close") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], shutter_close)) {
-                std::cerr << "Invalid --shutter-close value.\n";
-                return 1;
-            }
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.shutter_close)) { std::cerr << "Invalid --shutter-close value.\n"; return false; }
         } else if (arg == "--turntable") {
-            turntable_mode = true;
+            opt.turntable = true;
         } else if (arg == "--frames") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_int_arg(argv[++i], turntable_frames)) {
-                std::cerr << "Invalid --frames value.\n";
-                return 1;
-            }
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_int_arg(argv[++i], opt.turntable_frames)) { std::cerr << "Invalid --frames value.\n"; return false; }
         } else if (arg == "--turntable-radius") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], turntable_radius)) {
-                std::cerr << "Invalid --turntable-radius value.\n";
-                return 1;
-            }
-            turntable_radius_set = true;
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.turntable_radius)) { std::cerr << "Invalid --turntable-radius value.\n"; return false; }
+            opt.turntable_radius_set = true;
         } else if (arg == "--turntable-height") {
-            if (i + 1 >= argc) {
-                missing_value(1);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], turntable_height)) {
-                std::cerr << "Invalid --turntable-height value.\n";
-                return 1;
-            }
-            turntable_height_set = true;
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.turntable_height)) { std::cerr << "Invalid --turntable-height value.\n"; return false; }
+            opt.turntable_height_set = true;
         } else if (arg == "--turntable-center") {
-            if (i + 3 >= argc) {
-                missing_value(3);
-                return 1;
-            }
+            if (i + 3 >= argc) { missing_value(3); return false; }
             float cx, cy, cz;
             if (!parse_float_arg(argv[++i], cx) ||
                 !parse_float_arg(argv[++i], cy) ||
                 !parse_float_arg(argv[++i], cz)) {
                 std::cerr << "Invalid --turntable-center value(s).\n";
-                return 1;
+                return false;
             }
-            turntable_center = Vec3(cx, cy, cz);
-            turntable_center_set = true;
+            opt.turntable_center = Vec3(cx, cy, cz);
+            opt.turntable_center_set = true;
         } else if (arg == "--look-from") {
-            if (i + 3 >= argc) {
-                missing_value(3);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], look_from_override.x) ||
-                !parse_float_arg(argv[++i], look_from_override.y) ||
-                !parse_float_arg(argv[++i], look_from_override.z)) {
+            if (i + 3 >= argc) { missing_value(3); return false; }
+            if (!parse_float_arg(argv[++i], opt.look_from_override.x) ||
+                !parse_float_arg(argv[++i], opt.look_from_override.y) ||
+                !parse_float_arg(argv[++i], opt.look_from_override.z)) {
                 std::cerr << "Invalid --look-from value(s).\n";
-                return 1;
+                return false;
             }
-            look_from_set = true;
+            opt.look_from_set = true;
         } else if (arg == "--look-at") {
-            if (i + 3 >= argc) {
-                missing_value(3);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], look_at_override.x) ||
-                !parse_float_arg(argv[++i], look_at_override.y) ||
-                !parse_float_arg(argv[++i], look_at_override.z)) {
+            if (i + 3 >= argc) { missing_value(3); return false; }
+            if (!parse_float_arg(argv[++i], opt.look_at_override.x) ||
+                !parse_float_arg(argv[++i], opt.look_at_override.y) ||
+                !parse_float_arg(argv[++i], opt.look_at_override.z)) {
                 std::cerr << "Invalid --look-at value(s).\n";
-                return 1;
+                return false;
             }
-            look_at_set = true;
+            opt.look_at_set = true;
         } else if (arg == "--up") {
-            if (i + 3 >= argc) {
-                missing_value(3);
-                return 1;
-            }
-            if (!parse_float_arg(argv[++i], up_override.x) ||
-                !parse_float_arg(argv[++i], up_override.y) ||
-                !parse_float_arg(argv[++i], up_override.z)) {
+            if (i + 3 >= argc) { missing_value(3); return false; }
+            if (!parse_float_arg(argv[++i], opt.up_override.x) ||
+                !parse_float_arg(argv[++i], opt.up_override.y) ||
+                !parse_float_arg(argv[++i], opt.up_override.z)) {
                 std::cerr << "Invalid --up value(s).\n";
-                return 1;
+                return false;
             }
-            up_set = true;
+            opt.up_set = true;
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
             print_usage(argv[0]);
-            return 1;
+            return false;
         }
     }
+    return true;
+}
 
-    if (width <= 0 || height <= 0 || samples_per_pixel <= 0 || max_depth <= 0) {
+bool compute_gltf_bounds(const std::vector<GltfMeshInstance>& meshes, AABB& out_bounds) {
+    bool has_bounds = false;
+    for (const auto& inst : meshes) {
+        if (!inst.data) continue;
+        const AABB inst_bounds = transform_aabb(inst.data->bounding_box(), inst.transform);
+        if (!has_bounds) {
+            out_bounds = inst_bounds;
+            has_bounds = true;
+        } else {
+            out_bounds = surrounding_box(out_bounds, inst_bounds);
+        }
+    }
+    return has_bounds;
+}
+
+bool add_scaled_gltf(
+    Scene& scene,
+    const std::string& path,
+    const Vec3& target_pos,
+    float target_height,
+    std::string* out_err)
+{
+    std::vector<GltfMeshInstance> meshes;
+    std::string gltf_err;
+    GltfLoadOptions gltf_options;
+    if (!load_gltf_meshes(path, meshes, &gltf_err, gltf_options)) {
+        if (out_err) *out_err = gltf_err;
+        return false;
+    }
+
+    AABB bounds;
+    if (!compute_gltf_bounds(meshes, bounds)) {
+        if (out_err) *out_err = "glTF contained no mesh data.";
+        return false;
+    }
+
+    const float bounds_h = bounds.max.y - bounds.min.y;
+    const float scale = (bounds_h > 1e-6f) ? (target_height / bounds_h) : 1.0f;
+
+    // Pivot at bottom-center.
+    const Vec3 pivot(
+        (bounds.min.x + bounds.max.x) * 0.5f,
+        bounds.min.y,
+        (bounds.min.z + bounds.max.z) * 0.5f);
+
+    const Transform world_from_gltf =
+        Transform::translate(target_pos) *
+        Transform::uniform_scale(scale) *
+        Transform::translate(-pivot);
+
+    for (const auto& inst : meshes) {
+        if (!inst.data || !inst.material) continue;
+        scene.objects.push_back(std::make_shared<Mesh>(inst.data, world_from_gltf * inst.transform, inst.material));
+    }
+
+    return true;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    Options opt;
+    if (!parse_args(argc, argv, opt)) {
+        // parse_args already printed usage; treat --help as clean exit.
+        for (int i = 1; i < argc; ++i) {
+            if (std::string(argv[i]) == "--help" || std::string(argv[i]) == "-h") return 0;
+        }
+        return 1;
+    }
+
+    if (opt.width <= 0 || opt.height <= 0 || opt.spp <= 0 || opt.max_depth <= 0) {
         std::cerr << "Invalid render parameters.\n";
         return 1;
     }
-    if (aperture < 0.0f) {
+    if (opt.aperture < 0.0f) {
         std::cerr << "Invalid --aperture value (must be >= 0).\n";
         return 1;
     }
-    if (shutter_close < shutter_open) {
+    if (opt.shutter_close < opt.shutter_open) {
         std::cerr << "Invalid shutter interval (--shutter-close must be >= --shutter-open).\n";
         return 1;
     }
-    if (turntable_mode && turntable_frames <= 0) {
+    if (opt.turntable && opt.turntable_frames <= 0) {
         std::cerr << "Invalid --frames value (must be > 0).\n";
         return 1;
     }
-    if (turntable_radius_set && turntable_radius <= 0.0f) {
+    if (opt.turntable_radius_set && opt.turntable_radius <= 0.0f) {
         std::cerr << "Invalid --turntable-radius value (must be > 0).\n";
         return 1;
     }
 
-    Film film(width, height);
+    Film film(opt.width, opt.height);
     Scene scene;
-    
+
     CameraSettings cam_settings;
-    cam_settings.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
-    cam_settings.vertical_fov_deg = 45.0f;
-    cam_settings.image_width = width;
-    cam_settings.image_height = height;
-    
-    if (scene_name == "simple") {
+    cam_settings.aspect_ratio = static_cast<float>(opt.width) / static_cast<float>(opt.height);
+    cam_settings.vertical_fov_deg = 55.0f;
+    cam_settings.image_width = opt.width;
+    cam_settings.image_height = opt.height;
+
+    // -------------------------
+    // Scene selection
+    // -------------------------
+    if (opt.scene_name == "simple") {
         scene = build_simple_scene_basic();
         cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
         cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
-    } 
-    else if (scene_name == "dof") {
+        cam_settings.vertical_fov_deg = 45.0f;
+    } else if (opt.scene_name == "dof") {
         scene = build_dof_scene();
         cam_settings.look_from = Vec3(0.0f, 2.0f, 2.5f);
-        cam_settings.look_at = Vec3(0.0f, 0.5f, -2.0f); 
+        cam_settings.look_at = Vec3(0.0f, 0.5f, -2.0f);
         cam_settings.vertical_fov_deg = 35.0f;
-    }
-    else if (scene_name == "motion") {
+    } else if (opt.scene_name == "motion") {
         scene = build_motion_blur_scene();
         cam_settings.look_from = Vec3(0.0f, 2.0f, 8.0f);
         cam_settings.look_at = Vec3(0.0f, 1.5f, 0.0f);
         cam_settings.vertical_fov_deg = 30.0f;
-    }
-    else if (scene_name == "texture") {
+    } else if (opt.scene_name == "texture") {
         scene = build_texture_scene();
         cam_settings.look_from = Vec3(0.0f, 3.0f, 8.0f);
         cam_settings.look_at = Vec3(0.0f, 2.0f, 0.0f);
         cam_settings.vertical_fov_deg = 35.0f;
-    }
-    else if (scene_name == "random") {
+    } else if (opt.scene_name == "random") {
         scene = build_random_scene();
         cam_settings.look_from = Vec3(13.0f, 2.0f, 3.0f);
         cam_settings.look_at = Vec3(0.0f, 0.0f, 0.0f);
         cam_settings.vertical_fov_deg = 20.0f;
-        if (aperture == 0.0f) aperture = 0.1f;
-        if (focus_dist < 0.0f) focus_dist = 10.0f;
-    }
-    else if (scene_name == "solar") {
+        if (opt.aperture == 0.0f) opt.aperture = 0.1f;
+        if (opt.focus_dist < 0.0f) opt.focus_dist = 10.0f;
+    } else if (opt.scene_name == "solar") {
         scene = build_solar_system_scene();
         cam_settings.look_from = Vec3(0.0f, 0.0f, 8.5f);
         cam_settings.look_at = Vec3(0.0f, 0.0f, 0.0f);
         cam_settings.vertical_fov_deg = 35.0f;
         cam_settings.aperture = 0.05f;
         cam_settings.focus_dist = 8.5f;
-    }
-    else if (scene_name == "alpha") {
+    } else if (opt.scene_name == "alpha") {
         scene = build_alpha_shadow_scene();
         cam_settings.look_from = Vec3(0.0f, 3.0f, 6.0f);
         cam_settings.look_at = Vec3(0.0f, 1.0f, 0.0f);
         cam_settings.vertical_fov_deg = 40.0f;
-    }
-    else if (scene_name == "mesh") {
+    } else if (opt.scene_name == "mesh") {
         scene = build_mesh_scene();
         cam_settings.look_from = Vec3(0.0f, 1.6f, 3.5f);
         cam_settings.look_at = Vec3(0.0f, 0.7f, -1.0f);
         cam_settings.vertical_fov_deg = 35.0f;
-    }
-    else if (scene_name == "hotel") {
-        scene = build_hotel_room_scene();
-        if (env_path.empty()) {
-            env_path = "../assets/hdri/venice_sunset_4k.hdr";
-        }
-        if (!samples_per_pixel_set) {
-            samples_per_pixel = 128;
-        }
-        if (!max_depth_set) {
-            max_depth = 8;
-        }
-
-        std::vector<GltfMeshInstance> plant_meshes;
-        std::string gltf_err;
-        GltfLoadOptions gltf_options;
-        if (!load_gltf_meshes(gltf_path, plant_meshes, &gltf_err, gltf_options)) {
-            std::cerr << "Failed to load plant glTF: " << gltf_path << "\n";
-            if (!gltf_err.empty()) {
-                std::cerr << gltf_err << "\n";
-            }
-            return 1;
-        }
-
-        bool has_bounds = false;
-        AABB bounds;
-        for (const auto& inst : plant_meshes) {
-            if (!inst.data) {
-                continue;
-            }
-            const AABB inst_bounds = transform_aabb(inst.data->bounding_box(), inst.transform);
-            if (!has_bounds) {
-                bounds = inst_bounds;
-                has_bounds = true;
-            } else {
-                bounds = surrounding_box(bounds, inst_bounds);
-            }
-        }
-
-        if (!has_bounds) {
-            std::cerr << "Plant glTF contained no mesh data: " << gltf_path << "\n";
-            return 1;
-        }
-
-        const float height = bounds.max.y - bounds.min.y;
-        const float target_height = 1.25f;
-        const float scale = (height > 1e-6f) ? (target_height / height) : 1.0f;
-
-        const Vec3 pivot((bounds.min.x + bounds.max.x) * 0.5f, bounds.min.y, (bounds.min.z + bounds.max.z) * 0.5f);
-        const Vec3 target_pos(-1.2f, 0.0f, -4.55f);
-        const Transform plant_transform =
-            Transform::translate(target_pos) *
-            Transform::uniform_scale(scale) *
-            Transform::translate(-pivot);
-
-        for (const auto& inst : plant_meshes) {
-            if (!inst.data || !inst.material) {
-                continue;
-            }
-            scene.objects.push_back(std::make_shared<Mesh>(inst.data, plant_transform * inst.transform, inst.material));
-        }
-
-        cam_settings.look_from = Vec3(0.0f, 1.45f, -0.6f);
-        cam_settings.look_at = Vec3(0.0f, 1.35f, -4.6f);
-        cam_settings.vertical_fov_deg = 45.0f;
-    }
-    else if (scene_name == "gltf") {
+    } else if (opt.scene_name == "gltf") {
+        // Simple test room + ceiling light + glTF.
         auto ground_mat = std::make_shared<Lambertian>(
             std::make_shared<SolidColor>(Color(0.75f, 0.75f, 0.75f)));
         scene.objects.push_back(std::make_shared<Quad>(
@@ -480,34 +401,76 @@ int main(int argc, char** argv) {
         scene.objects.push_back(light);
         scene.lights.add_area_light(light);
 
+        if (opt.gltf_path.empty()) {
+            std::cerr << "Scene 'gltf' requires --gltf <path>.\n";
+            return 1;
+        }
         std::string gltf_err;
         GltfLoadOptions gltf_options;
-        if (!append_gltf_to_scene(gltf_path, scene, Transform::identity(), &gltf_err, gltf_options)) {
-            std::cerr << "Failed to load glTF: " << gltf_path << "\n";
-            if (!gltf_err.empty()) {
-                std::cerr << gltf_err << "\n";
-            }
+        if (!append_gltf_to_scene(opt.gltf_path, scene, Transform::identity(), &gltf_err, gltf_options)) {
+            std::cerr << "Failed to load glTF: " << opt.gltf_path << "\n";
+            if (!gltf_err.empty()) std::cerr << gltf_err << "\n";
             return 1;
         }
 
         cam_settings.look_from = Vec3(0.0f, 0.55f, 1.6f);
         cam_settings.look_at = Vec3(0.0f, 0.45f, 0.0f);
         cam_settings.vertical_fov_deg = 35.0f;
-    }
-    else {
-        std::cerr << "Unknown scene name: " << scene_name << "\n";
+    } else if (opt.scene_name == "hotel") {
+        // Modern bedroom aligned to your reference image.
+        scene = build_hotel_room_scene();
+
+        // If user didn't set quality, bump defaults for this interior shot.
+        if (!opt.spp_set) opt.spp = 256;
+        if (!opt.max_depth_set) opt.max_depth = 10;
+
+        // Lighting: keep HDR for bounce/ambient if present.
+        // Background: if we have outside glTF, hiding env bg usually looks better.
+        if (!opt.hide_env_bg_set && !opt.gltf_path.empty()) {
+            opt.hide_env_bg = true;
+        }
+        if (opt.env_path.empty()) {
+            // Keep your previous default HDR if you have it; otherwise leave empty.
+            opt.env_path = "../assets/hdri/venice_sunset_4k.hdr";
+        }
+
+        // Place indoor plant (optional).
+        if (!opt.plant_gltf_path.empty()) {
+            std::string err;
+            // Near window-left in the room.
+            if (!add_scaled_gltf(scene, opt.plant_gltf_path, Vec3(-2.85f, 0.0f, -7.95f), 1.20f, &err)) {
+                std::cerr << "Failed to load plant glTF: " << opt.plant_gltf_path << "\n";
+                if (!err.empty()) std::cerr << err << "\n";
+                return 1;
+            }
+        }
+
+        // Place outside model (this is the key requirement).
+        if (!opt.gltf_path.empty()) {
+            std::string err;
+            // Put it outside the window wall (window wall is around z ~= -9 in the builder below).
+            if (!add_scaled_gltf(scene, opt.gltf_path, Vec3(0.0f, 0.0f, -13.5f), 8.0f, &err)) {
+                std::cerr << "Failed to load outside glTF: " << opt.gltf_path << "\n";
+                if (!err.empty()) std::cerr << err << "\n";
+                return 1;
+            }
+        }
+
+        // Camera: straight view facing the window (not diagonal).
+        cam_settings.look_from = Vec3(0.0f, 1.30f, 0.80f);
+        cam_settings.look_at   = Vec3(0.0f, 1.30f, -5.00f);
+        cam_settings.vertical_fov_deg = 55.0f;
+    } else {
+        std::cerr << "Unknown scene name: " << opt.scene_name << "\n";
         return 1;
     }
 
-    if (look_from_set) {
-        cam_settings.look_from = look_from_override;
-    }
-    if (look_at_set) {
-        cam_settings.look_at = look_at_override;
-    }
-    if (up_set) {
-        cam_settings.up = up_override;
-    }
+    // -------------------------
+    // Camera overrides
+    // -------------------------
+    if (opt.look_from_set) cam_settings.look_from = opt.look_from_override;
+    if (opt.look_at_set) cam_settings.look_at = opt.look_at_override;
+    if (opt.up_set) cam_settings.up = opt.up_override;
 
     if ((cam_settings.look_from - cam_settings.look_at).length_squared() <= 1e-8f) {
         std::cerr << "Invalid camera: look_from and look_at are too close.\n";
@@ -518,116 +481,111 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (!env_path.empty()) {
+    // -------------------------
+    // Environment
+    // -------------------------
+    if (!opt.env_path.empty()) {
         scene.environment = std::make_shared<EnvironmentMap>();
         std::string env_error;
-        if (!scene.environment->load_hdr(env_path, &env_error)) {
-            std::cerr << "Failed to load environment: " << env_path << "\n";
-            if (!env_error.empty()) {
-                std::cerr << env_error << "\n";
-            }
+        if (!scene.environment->load_hdr(opt.env_path, &env_error)) {
+            std::cerr << "Failed to load environment: " << opt.env_path << "\n";
+            if (!env_error.empty()) std::cerr << env_error << "\n";
             return 1;
         }
-    } else if (hide_env_bg) {
-        std::cerr << "Warning: --hide-env-bg set without --env; if the scene has no other lights it will render black.\n";
+    } else if (opt.hide_env_bg) {
+        std::cerr << "Warning: --hide-env-bg set without --env; rays escaping outside will render black.\n";
     }
-    scene.hide_environment_background = hide_env_bg;
-    if (scene.hide_environment_background && scene.environment && scene.environment->valid()) {
-        std::cout << "Environment background hidden (environment still used for lighting).\n";
-    }
+    scene.hide_environment_background = opt.hide_env_bg;
 
     scene.build_bvh();
 
-    cam_settings.aperture = aperture;
-    cam_settings.t0 = shutter_open;
-    cam_settings.t1 = shutter_close;
+    // -------------------------
+    // DOF / motion
+    // -------------------------
+    cam_settings.aperture = opt.aperture;
+    cam_settings.t0 = opt.shutter_open;
+    cam_settings.t1 = opt.shutter_close;
 
-    if (focus_dist <= 0.0f) {
-        const Vec3 diff = cam_settings.look_from - cam_settings.look_at;
-        cam_settings.focus_dist = diff.length();
+    if (opt.focus_dist <= 0.0f) {
+        cam_settings.focus_dist = (cam_settings.look_from - cam_settings.look_at).length();
     } else {
-        cam_settings.focus_dist = focus_dist;
+        cam_settings.focus_dist = opt.focus_dist;
     }
 
-    if (!turntable_mode) {
+    // -------------------------
+    // Render
+    // -------------------------
+    if (!opt.turntable) {
         Camera camera(cam_settings);
-        PathTracer integrator(max_depth);
+        PathTracer integrator(opt.max_depth);
 
-        std::cout << "Rendering scene: " << scene_name << "\n";
-        render_image(scene, camera, integrator, film, samples_per_pixel);
+        std::cout << "Rendering scene: " << opt.scene_name << "\n";
+        render_image(scene, camera, integrator, film, opt.spp);
 
-        if (output.size() >= 4 && output.substr(output.size() - 4) == ".png") {
-            write_png(output, film);
-            std::cout << "Wrote PNG image to " << output << "\n";
+        if (opt.output.size() >= 4 && opt.output.substr(opt.output.size() - 4) == ".png") {
+            write_png(opt.output, film);
+            std::cout << "Wrote PNG image to " << opt.output << "\n";
         } else {
-            write_ppm(output, film);
-            std::cout << "Wrote PPM image to " << output << "\n";
+            write_ppm(opt.output, film);
+            std::cout << "Wrote PPM image to " << opt.output << "\n";
         }
     } else {
-        PathTracer integrator(max_depth);
+        PathTracer integrator(opt.max_depth);
 
-        if (turntable_radius <= 0.0f) {
+        if (opt.turntable_radius <= 0.0f) {
             Vec3 diff = cam_settings.look_from - cam_settings.look_at;
-            turntable_radius = std::sqrt(diff.x * diff.x + diff.z * diff.z);
+            opt.turntable_radius = std::sqrt(diff.x * diff.x + diff.z * diff.z);
         }
-        if (!turntable_height_set) {
-            turntable_height = cam_settings.look_from.y;
-        }
-        if (!turntable_center_set) {
-            turntable_center = cam_settings.look_at;
-        }
+        if (!opt.turntable_height_set) opt.turntable_height = cam_settings.look_from.y;
+        if (!opt.turntable_center_set) opt.turntable_center = cam_settings.look_at;
 
-        std::cout << "Turntable mode: " << turntable_frames << " frames\n";
-        std::cout << "  Center: (" << turntable_center.x << ", " 
-                  << turntable_center.y << ", " << turntable_center.z << ")\n";
-        std::cout << "  Radius: " << turntable_radius << ", Height: " << turntable_height << "\n";
+        std::cout << "Turntable mode: " << opt.turntable_frames << " frames\n";
+        std::cout << "  Center: (" << opt.turntable_center.x << ", "
+                  << opt.turntable_center.y << ", " << opt.turntable_center.z << ")\n";
+        std::cout << "  Radius: " << opt.turntable_radius << ", Height: " << opt.turntable_height << "\n";
 
-        std::string base_name = output;
+        std::string base_name = opt.output;
         std::string extension = ".png";
-        if (output.size() >= 4) {
-            std::string ext = output.substr(output.size() - 4);
+        if (opt.output.size() >= 4) {
+            std::string ext = opt.output.substr(opt.output.size() - 4);
             if (ext == ".png" || ext == ".ppm") {
                 extension = ext;
-                base_name = output.substr(0, output.size() - 4);
+                base_name = opt.output.substr(0, opt.output.size() - 4);
             }
         }
 
-        const float angle_step = 2.0f * kPi / static_cast<float>(turntable_frames);
+        const float angle_step = 2.0f * kPi / static_cast<float>(opt.turntable_frames);
 
-        for (int frame = 0; frame < turntable_frames; ++frame) {
-            float angle = frame * angle_step;
+        for (int frame = 0; frame < opt.turntable_frames; ++frame) {
+            const float angle = frame * angle_step;
 
-            float x = turntable_center.x + turntable_radius * std::sin(angle);
-            float z = turntable_center.z + turntable_radius * std::cos(angle);
+            const float x = opt.turntable_center.x + opt.turntable_radius * std::sin(angle);
+            const float z = opt.turntable_center.z + opt.turntable_radius * std::cos(angle);
 
-            cam_settings.look_from = Vec3(x, turntable_height, z);
-            cam_settings.look_at = turntable_center;
-
-            Vec3 diff = cam_settings.look_from - cam_settings.look_at;
-            cam_settings.focus_dist = diff.length();
+            cam_settings.look_from = Vec3(x, opt.turntable_height, z);
+            cam_settings.look_at = opt.turntable_center;
+            cam_settings.focus_dist = (cam_settings.look_from - cam_settings.look_at).length();
 
             Camera camera(cam_settings);
+            Film frame_film(opt.width, opt.height);
 
-            Film frame_film(width, height);
-
-            std::cout << "\rRendering frame " << (frame + 1) << "/" << turntable_frames 
+            std::cout << "\rRendering frame " << (frame + 1) << "/" << opt.turntable_frames
                       << " (angle: " << static_cast<int>(angle * 180.0f / kPi) << " deg)" << std::flush;
 
-            render_image(scene, camera, integrator, frame_film, samples_per_pixel);
+            render_image(scene, camera, integrator, frame_film, opt.spp);
 
             std::ostringstream filename;
             filename << base_name << "_" << std::setfill('0') << std::setw(4) << frame << extension;
 
-            if (extension == ".png") {
-                write_png(filename.str(), frame_film);
-            } else {
-                write_ppm(filename.str(), frame_film);
-            }
+            if (extension == ".png") write_png(filename.str(), frame_film);
+            else write_ppm(filename.str(), frame_film);
         }
 
         std::cout << "\nTurntable rendering complete!\n";
         std::cout << "To create GIF, run:\n";
-        std::cout << "  ffmpeg -framerate 30 -i " << base_name << "_%04d.png -vf \"fps=30,scale=480:-1:flags=lanczos\" " << base_name << ".gif\n";
+        std::cout << "  ffmpeg -framerate 30 -i " << base_name
+                  << "_%04d.png -vf \"fps=30,scale=480:-1:flags=lanczos\" "
+                  << base_name << ".gif\n";
     }
 
     return 0;
