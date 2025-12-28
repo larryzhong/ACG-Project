@@ -586,7 +586,7 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     const float y0 =  0.0f;
     const float y1 =  3.0f;
     const float z0 = -9.0f;   // window wall
-    const float z1 =  1.0f;   // camera side wall
+    const float z1 =  10.0f;   // camera side wall
 
     // Shell: floor / ceiling / left / right / entrance.
     scene.objects.push_back(std::make_shared<Quad>(
@@ -1007,6 +1007,119 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     add_book(-3.00f, 1.14f, 0.28f, 0.04f, 0.20f, book_blue);
     add_book(-2.95f, 1.14f, 0.26f, 0.035f, 0.22f, book_orange);
 
+    // -------------------------
+    // Sofa (facing TV on left wall, against right wall)
+    // -------------------------
+    auto sofa_fabric_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.28f, 0.32f, 0.38f)),
+        0.0f, nullptr, 0.85f, nullptr, nullptr, 1.0f);
+
+    auto sofa_leg_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.15f, 0.12f, 0.08f)),
+        0.0f, nullptr, 0.5f, nullptr, nullptr, 1.0f);
+
+    const float sofa_w = 1.20f;
+    const float sofa_d = 0.70f;
+    const float sofa_seat_h = 0.38f;
+    const float sofa_back_h = 0.70f;
+    const float sofa_arm_w = 0.10f;
+    const float sofa_leg_h = 0.10f;
+
+    const float sofa_x1 = x1 - 0.05f;
+    const float sofa_x0 = sofa_x1 - sofa_d;
+    const float sofa_cz = -2.5f;
+    const float sofa_z0 = sofa_cz - sofa_w / 2;
+    const float sofa_z1 = sofa_cz + sofa_w / 2;
+
+    add_box(Vec3(sofa_x0, sofa_leg_h, sofa_z0),
+            Vec3(sofa_x1, sofa_seat_h, sofa_z1),
+            sofa_fabric_mat);
+
+    const float back_thickness = 0.15f;
+    add_box(Vec3(sofa_x1 - back_thickness, sofa_seat_h, sofa_z0 + sofa_arm_w),
+            Vec3(sofa_x1, sofa_back_h, sofa_z1 - sofa_arm_w),
+            sofa_fabric_mat);
+
+    add_box(Vec3(sofa_x0, sofa_seat_h, sofa_z0),
+            Vec3(sofa_x1 - back_thickness, sofa_seat_h + 0.18f, sofa_z0 + sofa_arm_w),
+            sofa_fabric_mat);
+
+    add_box(Vec3(sofa_x0, sofa_seat_h, sofa_z1 - sofa_arm_w),
+            Vec3(sofa_x1 - back_thickness, sofa_seat_h + 0.18f, sofa_z1),
+            sofa_fabric_mat);
+
+    const float leg_t = 0.04f;
+    const float leg_inset = 0.06f;
+    add_box(Vec3(sofa_x0 + leg_inset, 0.0f, sofa_z0 + leg_inset),
+            Vec3(sofa_x0 + leg_inset + leg_t, sofa_leg_h, sofa_z0 + leg_inset + leg_t),
+            sofa_leg_mat);
+    add_box(Vec3(sofa_x0 + leg_inset, 0.0f, sofa_z1 - leg_inset - leg_t),
+            Vec3(sofa_x0 + leg_inset + leg_t, sofa_leg_h, sofa_z1 - leg_inset),
+            sofa_leg_mat);
+    add_box(Vec3(sofa_x1 - leg_inset - leg_t, 0.0f, sofa_z0 + leg_inset),
+            Vec3(sofa_x1 - leg_inset, sofa_leg_h, sofa_z0 + leg_inset + leg_t),
+            sofa_leg_mat);
+    add_box(Vec3(sofa_x1 - leg_inset - leg_t, 0.0f, sofa_z1 - leg_inset - leg_t),
+            Vec3(sofa_x1 - leg_inset, sofa_leg_h, sofa_z1 - leg_inset),
+            sofa_leg_mat);
+
+    // -------------------------
+    // Coffee table in front of sofa
+    // -------------------------
+    auto table_top_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.75f, 0.62f, 0.48f)),  // Light oak wood
+        0.0f, nullptr, 0.75f, nullptr, nullptr, 1.0f);  // High roughness = no reflection
+
+    auto table_wood_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.65f, 0.52f, 0.38f)),
+        0.0f, nullptr, 0.70f, nullptr, nullptr, 1.0f);
+
+    auto table_leg_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.60f, 0.48f, 0.35f)),
+        0.0f, nullptr, 0.65f, nullptr, nullptr, 1.0f);
+
+    const float table_h = 0.38f;
+    const float table_top_thick = 0.03f;
+    const float table_w = 0.90f;
+    const float table_d = 0.50f;
+    const float table_leg_t = 0.04f;
+    const float table_leg_inset = 0.05f;
+
+    const float table_cx = sofa_x0 - 0.35f - table_d / 2;
+    const float table_cz = sofa_cz;
+
+    const float table_x0 = table_cx - table_d / 2;
+    const float table_x1 = table_cx + table_d / 2;
+    const float table_z0 = table_cz - table_w / 2;
+    const float table_z1 = table_cz + table_w / 2;
+
+    // Wooden tabletop (no reflection)
+    add_box(Vec3(table_x0, table_h - table_top_thick, table_z0),
+            Vec3(table_x1, table_h, table_z1),
+            table_top_mat);
+
+    // Four legs
+    const float leg_base_y = table_h - table_top_thick;
+    add_box(Vec3(table_x0 + table_leg_inset, 0.0f, table_z0 + table_leg_inset),
+            Vec3(table_x0 + table_leg_inset + table_leg_t, leg_base_y, table_z0 + table_leg_inset + table_leg_t),
+            table_leg_mat);
+    add_box(Vec3(table_x1 - table_leg_inset - table_leg_t, 0.0f, table_z0 + table_leg_inset),
+            Vec3(table_x1 - table_leg_inset, leg_base_y, table_z0 + table_leg_inset + table_leg_t),
+            table_leg_mat);
+    add_box(Vec3(table_x0 + table_leg_inset, 0.0f, table_z1 - table_leg_inset - table_leg_t),
+            Vec3(table_x0 + table_leg_inset + table_leg_t, leg_base_y, table_z1 - table_leg_inset),
+            table_leg_mat);
+    add_box(Vec3(table_x1 - table_leg_inset - table_leg_t, 0.0f, table_z1 - table_leg_inset - table_leg_t),
+            Vec3(table_x1 - table_leg_inset, leg_base_y, table_z1 - table_leg_inset),
+            table_leg_mat);
+
+    // Lower shelf
+    const float tbl_shelf_y = 0.12f;
+    const float tbl_shelf_thick = 0.02f;
+    add_box(Vec3(table_x0 + 0.06f, tbl_shelf_y, table_z0 + 0.06f),
+            Vec3(table_x1 - 0.06f, tbl_shelf_y + tbl_shelf_thick, table_z1 - 0.06f),
+            table_wood_mat);
+    
     // Floor lamp near left-front corner (realistic size)
     auto lamp_shade_mat = std::make_shared<Lambertian>(
         std::make_shared<SolidColor>(Color(0.86f, 0.86f, 0.84f)));
