@@ -658,9 +658,9 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
 
     // Bed (right side), oriented along X (faces left wall TV / right wall art).
     // Frame base
-    add_box(Vec3(0.85f, 0.0f, -6.70f), Vec3(3.65f, 0.30f, -3.30f), bed_frame_mat);
+    add_box(Vec3(0.85f, 0.0f, -7.90f), Vec3(3.65f, 0.30f, -4.50f), bed_frame_mat);
     // Mattress
-    add_box(Vec3(0.95f, 0.30f, -6.60f), Vec3(3.55f, 0.65f, -3.40f), bedding_mat);
+    add_box(Vec3(0.95f, 0.30f, -7.80f), Vec3(3.55f, 0.65f, -4.60f), bedding_mat);
     // Pillow (OBJ)
     // Loads ../assets/models/Pillow.obj and auto-scales it to a reasonable size.
     {
@@ -734,7 +734,7 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
 
                 // Place pillow near the near (camera-side) nightstand and lean into it.
                 const float desired_cx = 3.45f;
-                const float desired_cz = -4.90f;
+                const float desired_cz = -6.10f;
 
                 const float tx = desired_cx - center_base.x;
                 const float tz = desired_cz - center_base.z;
@@ -754,20 +754,58 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
         }
     }
     // Headboard (against right wall side, thickness on +X)
-    add_box(Vec3(3.65f, 0.0f, -6.75f), Vec3(3.85f, 1.35f, -3.25f), headboard_mat);
+    add_box(Vec3(3.65f, 0.0f, -7.95f), Vec3(3.85f, 1.35f, -4.45f), headboard_mat);
 
-    // Nightstands: near / far corners by the headboard (both close to right wall)
-    add_box(Vec3(3.40f, 0.0f, -3.25f), Vec3(3.90f, 0.45f, -2.75f), wood_mat); // near (camera side)
-    add_box(Vec3(3.40f, 0.0f, -7.25f), Vec3(3.90f, 0.45f, -6.75f), wood_mat); // far (window side)
+    // Nightstands with legs (make legs readable at the default camera distance).
+    const float nightstand_x0 = 3.40f;
+    const float nightstand_x1 = 3.90f;
+    const float nightstand_top_y = 0.45f;
+    const float nightstand_leg_h = 0.24f;
+    const float nightstand_leg_t = 0.07f;
+    const float nightstand_leg_inset = 0.00f;
+
+    auto leg_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.60f, 0.58f, 0.55f)),
+        /*metallic_factor=*/1.0f,
+        /*metallic_tex=*/nullptr,
+        /*roughness_factor=*/0.35f,
+        /*roughness_tex=*/nullptr,
+        /*normal_map=*/nullptr,
+        /*normal_strength=*/1.0f);
+
+    auto add_nightstand = [&](float z0_ns, float z1_ns) {
+        add_box(Vec3(nightstand_x0, nightstand_leg_h, z0_ns),
+                Vec3(nightstand_x1, nightstand_top_y, z1_ns),
+                wood_mat);
+
+        const float lx0 = nightstand_x0 + nightstand_leg_inset;
+        const float lx1 = lx0 + nightstand_leg_t;
+        const float rx1 = nightstand_x1 - nightstand_leg_inset;
+        const float rx0 = rx1 - nightstand_leg_t;
+
+        const float bz0 = z0_ns + nightstand_leg_inset;
+        const float bz1 = bz0 + nightstand_leg_t;
+        const float fz1 = z1_ns - nightstand_leg_inset;
+        const float fz0 = fz1 - nightstand_leg_t;
+
+        add_box(Vec3(lx0, 0.0f, bz0), Vec3(lx1, nightstand_leg_h, bz1), leg_mat);
+        add_box(Vec3(rx0, 0.0f, bz0), Vec3(rx1, nightstand_leg_h, bz1), leg_mat);
+        add_box(Vec3(lx0, 0.0f, fz0), Vec3(lx1, nightstand_leg_h, fz1), leg_mat);
+        add_box(Vec3(rx0, 0.0f, fz0), Vec3(rx1, nightstand_leg_h, fz1), leg_mat);
+    };
+
+    // Near nightstand (camera side)
+    add_nightstand(/*z0_ns=*/-4.45f, /*z1_ns=*/-3.95f);
+
+    // Far nightstand (window side)
+    add_nightstand(/*z0_ns=*/-8.45f, /*z1_ns=*/-7.95f);
 
     // Bedside lamps (warm): shade + glowing bulb (sphere)
     auto bedside_light_mat = std::make_shared<DiffuseLight>(
         std::make_shared<SolidColor>(Color(6.0f, 5.2f, 4.0f)));
 
-    auto bedside_shade_tex = std::make_shared<ForceAlphaTexture>(
-        std::make_shared<SolidColor>(Color(0.88f, 0.87f, 0.84f)),
-        /*alpha=*/0.60f);
-    auto bedside_shade_mat = std::make_shared<Lambertian>(bedside_shade_tex);
+    auto bedside_shade_emission = std::make_shared<SolidColor>(Color(2.0f, 1.5f, 0.8f));
+    auto bedside_shade_mat = std::make_shared<DiffuseLight>(bedside_shade_emission);
 
     auto make_open_frustum = [](int segments, float r0, float r1, float h) -> MeshDataPtr {
         if (segments < 3) segments = 3;
@@ -815,7 +853,7 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
         return std::make_shared<MeshData>(std::move(positions), std::vector<Vec3>{}, std::move(uvs), std::move(indices));
     };
 
-    const float bedside_shade_y0 = 0.48f;
+    const float bedside_shade_y0 = 0.62f;
     const float bedside_shade_h = 0.30f;
     const float bedside_shade_r0 = 0.18f;
     const float bedside_shade_r1 = 0.11f;
@@ -827,6 +865,12 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     const float bedside_bulb_y = bedside_shade_y0 + 0.17f;
 
     auto add_bedside_lamp = [&](float cx, float cz) {
+        const float base_w = 0.06f;
+        const float base_h = bedside_shade_y0 - nightstand_top_y;
+        add_box(Vec3(cx - base_w, nightstand_top_y, cz - base_w),
+                Vec3(cx + base_w, bedside_shade_y0, cz + base_w),
+                metal_dark_mat);
+
         const Transform shade_tr = Transform::translate(Vec3(cx, bedside_shade_y0, cz));
         scene.objects.push_back(std::make_shared<Mesh>(bedside_shade_data, shade_tr, bedside_shade_mat));
 
@@ -835,17 +879,17 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
         scene.lights.add_area_light(bulb);
     };
 
-    add_bedside_lamp(3.65f, -3.00f); // near nightstand
-    add_bedside_lamp(3.65f, -7.00f); // far nightstand
+    add_bedside_lamp(3.65f, -4.20f); // near nightstand
+    add_bedside_lamp(3.65f, -8.20f); // far nightstand
 
     // TV on left wall + low cabinet (blue), facing into the room (+X).
-    add_box(Vec3(x0 + 0.10f, 0.0f, -5.65f), Vec3(x0 + 0.85f, 0.32f, -4.35f), cabinet_blue_mat);
+    add_box(Vec3(x0 + 0.10f, 0.0f, -6.85f), Vec3(x0 + 0.85f, 0.32f, -5.55f), cabinet_blue_mat);
 
     // TV (55 inch, 16:9 ratio: ~1.22m x 0.68m)
     const float tv_w = 1.22f;
     const float tv_h = 0.68f;
     const float tv_cy = 1.10f;
-    const float tv_cz = -5.00f;
+    const float tv_cz = -6.20f;
 
     // TV body (frame)
     add_box(Vec3(x0 + 0.05f, tv_cy - tv_h/2 - 0.04f, tv_cz - tv_w/2 - 0.04f),
@@ -858,6 +902,110 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
         Vec3(0.0f, tv_h, 0.0f),
         Vec3(0.0f, 0.0f, tv_w),
         tv_screen_mat));
+    
+    // -------------------------
+    // Bookshelf (left wall, near camera side of TV cabinet)
+    // -------------------------
+    // Bookshelf dimensions
+    const float shelf_x0 = x0 + 0.10f;      // Against left wall
+    const float shelf_x1 = x0 + 0.45f;      // Depth ~0.35m
+    const float shelf_z0 = -4.20f;          // Start (window side)
+    const float shelf_z1 = -2.60f;          // End (camera side)
+    const float shelf_h = 1.50f;            // Total height
+    const float shelf_thickness = 0.02f;   // Board thickness
+    
+    // Bookshelf frame material (dark wood)
+    auto shelf_wood_mat = std::make_shared<PrincipledBSDF>(
+        std::make_shared<SolidColor>(Color(0.22f, 0.15f, 0.10f)),
+        0.0f, nullptr, 0.45f, nullptr, nullptr, 1.0f);
+
+    // Vertical sides
+    add_box(Vec3(shelf_x0, 0.0f, shelf_z0), Vec3(shelf_x1, shelf_h, shelf_z0 + shelf_thickness), shelf_wood_mat);  // Left side
+    add_box(Vec3(shelf_x0, 0.0f, shelf_z1 - shelf_thickness), Vec3(shelf_x1, shelf_h, shelf_z1), shelf_wood_mat);  // Right side
+    
+    // Back panel
+    add_box(Vec3(shelf_x0, 0.0f, shelf_z0), Vec3(shelf_x0 + shelf_thickness, shelf_h, shelf_z1), shelf_wood_mat);
+    
+    // Horizontal shelves (4 levels including top and bottom)
+    const float shelf_levels[] = {0.0f, 0.38f, 0.76f, 1.14f, shelf_h - shelf_thickness};
+    for (float level : shelf_levels) {
+        add_box(Vec3(shelf_x0, level, shelf_z0), Vec3(shelf_x1, level + shelf_thickness, shelf_z1), shelf_wood_mat);
+    }
+
+    // -------------------------
+    // Books on shelves
+    // -------------------------
+    auto make_book_mat = [](const Color& c) {
+        return std::make_shared<PrincipledBSDF>(
+            std::make_shared<SolidColor>(c),
+            0.0f, nullptr, 0.7f, nullptr, nullptr, 1.0f);
+    };
+
+    // Book colors
+    auto book_red = make_book_mat(Color(0.6f, 0.15f, 0.12f));
+    auto book_blue = make_book_mat(Color(0.12f, 0.18f, 0.45f));
+    auto book_green = make_book_mat(Color(0.15f, 0.35f, 0.18f));
+    auto book_brown = make_book_mat(Color(0.4f, 0.25f, 0.15f));
+    auto book_navy = make_book_mat(Color(0.1f, 0.12f, 0.25f));
+    auto book_beige = make_book_mat(Color(0.75f, 0.70f, 0.60f));
+    auto book_orange = make_book_mat(Color(0.7f, 0.35f, 0.1f));
+    auto book_black = make_book_mat(Color(0.08f, 0.08f, 0.08f));
+
+    // Helper to add a book (standing upright)
+    // book_x: depth into shelf, book_z: position along shelf, book_h: height, book_w: width (thickness)
+    auto add_book = [&](float z_pos, float level_y, float height, float width, float depth, const MaterialPtr& mat) {
+        const float base_y = level_y + shelf_thickness + 0.002f;  // Slightly above shelf
+        add_box(Vec3(shelf_x0 + 0.03f, base_y, z_pos),
+                Vec3(shelf_x0 + 0.03f + depth, base_y + height, z_pos + width),
+                mat);
+    };
+
+    // Shelf 1 (bottom, level_y = 0.0)
+    add_book(-4.15f, 0.0f, 0.28f, 0.04f, 0.22f, book_brown);
+    add_book(-4.10f, 0.0f, 0.30f, 0.03f, 0.20f, book_red);
+    add_book(-4.06f, 0.0f, 0.26f, 0.035f, 0.21f, book_navy);
+    add_book(-4.02f, 0.0f, 0.29f, 0.025f, 0.19f, book_beige);
+    add_book(-3.98f, 0.0f, 0.27f, 0.04f, 0.22f, book_green);
+    add_book(-3.55f, 0.0f, 0.32f, 0.05f, 0.24f, book_black);
+    add_book(-3.49f, 0.0f, 0.28f, 0.03f, 0.20f, book_blue);
+    add_book(-3.45f, 0.0f, 0.30f, 0.04f, 0.22f, book_orange);
+    add_book(-3.05f, 0.0f, 0.25f, 0.035f, 0.18f, book_red);
+    add_book(-3.00f, 0.0f, 0.28f, 0.04f, 0.21f, book_brown);
+    add_book(-2.95f, 0.0f, 0.26f, 0.03f, 0.20f, book_navy);
+
+    // Shelf 2 (level_y = 0.38)
+    add_book(-4.15f, 0.38f, 0.26f, 0.035f, 0.20f, book_blue);
+    add_book(-4.11f, 0.38f, 0.30f, 0.04f, 0.22f, book_green);
+    add_book(-4.06f, 0.38f, 0.28f, 0.03f, 0.19f, book_beige);
+    add_book(-4.02f, 0.38f, 0.25f, 0.045f, 0.21f, book_red);
+    add_book(-3.60f, 0.38f, 0.29f, 0.03f, 0.20f, book_black);
+    add_book(-3.56f, 0.38f, 0.27f, 0.04f, 0.22f, book_orange);
+    add_book(-3.51f, 0.38f, 0.31f, 0.035f, 0.21f, book_navy);
+    add_book(-3.10f, 0.38f, 0.26f, 0.04f, 0.20f, book_brown);
+    add_book(-3.05f, 0.38f, 0.28f, 0.03f, 0.19f, book_blue);
+    add_book(-3.01f, 0.38f, 0.24f, 0.04f, 0.22f, book_green);
+    add_book(-2.96f, 0.38f, 0.29f, 0.035f, 0.20f, book_beige);
+
+    // Shelf 3 (level_y = 0.76)
+    add_book(-4.15f, 0.76f, 0.30f, 0.04f, 0.21f, book_orange);
+    add_book(-4.10f, 0.76f, 0.27f, 0.03f, 0.20f, book_navy);
+    add_book(-4.06f, 0.76f, 0.29f, 0.035f, 0.22f, book_brown);
+    add_book(-3.70f, 0.76f, 0.25f, 0.04f, 0.19f, book_red);
+    add_book(-3.65f, 0.76f, 0.28f, 0.03f, 0.21f, book_black);
+    add_book(-3.61f, 0.76f, 0.26f, 0.04f, 0.20f, book_beige);
+    add_book(-3.20f, 0.76f, 0.31f, 0.035f, 0.22f, book_blue);
+    add_book(-3.15f, 0.76f, 0.27f, 0.04f, 0.20f, book_green);
+    add_book(-3.10f, 0.76f, 0.29f, 0.03f, 0.21f, book_orange);
+
+    // Shelf 4 (level_y = 1.14)
+    add_book(-4.15f, 1.14f, 0.28f, 0.035f, 0.20f, book_green);
+    add_book(-4.11f, 1.14f, 0.25f, 0.04f, 0.21f, book_red);
+    add_book(-4.06f, 1.14f, 0.27f, 0.03f, 0.19f, book_navy);
+    add_book(-3.50f, 1.14f, 0.26f, 0.04f, 0.22f, book_beige);
+    add_book(-3.45f, 1.14f, 0.29f, 0.035f, 0.20f, book_brown);
+    add_book(-3.40f, 1.14f, 0.24f, 0.03f, 0.21f, book_black);
+    add_book(-3.00f, 1.14f, 0.28f, 0.04f, 0.20f, book_blue);
+    add_book(-2.95f, 1.14f, 0.26f, 0.035f, 0.22f, book_orange);
 
     // Floor lamp near left-front corner (realistic size)
     auto lamp_shade_mat = std::make_shared<Lambertian>(
@@ -885,15 +1033,13 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     const float rod_cx = 0.0f;
     const float rod_cz = -4.75f;
 
-    auto pendant_shade_tex = std::make_shared<ForceAlphaTexture>(
-        std::make_shared<SolidColor>(Color(0.90f, 0.89f, 0.86f)),
-        /*alpha=*/0.70f);
-    auto pendant_shade_mat = std::make_shared<Lambertian>(pendant_shade_tex);
+    auto pendant_shade_emission = std::make_shared<SolidColor>(Color(4.0f, 3.2f, 2.0f));
+    auto pendant_shade_mat = std::make_shared<DiffuseLight>(pendant_shade_emission);
 
-    const float pendant_shade_y0 = 2.15f;
-    const float pendant_shade_h  = 0.50f;
-    const float pendant_shade_r0 = 0.33f;
-    const float pendant_shade_r1 = 0.18f;
+    const float pendant_shade_y0 = 2.05f;
+    const float pendant_shade_h  = 0.55f;
+    const float pendant_shade_r0 = 0.28f;
+    const float pendant_shade_r1 = 0.08f;
     const int pendant_shade_segments = 36;
     const MeshDataPtr pendant_shade_data =
         make_open_frustum(pendant_shade_segments, pendant_shade_r0, pendant_shade_r1, pendant_shade_h);
@@ -908,10 +1054,14 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     const Transform pendant_shade_tr = Transform::translate(Vec3(rod_cx, pendant_shade_y0, rod_cz));
     scene.objects.push_back(std::make_shared<Mesh>(pendant_shade_data, pendant_shade_tr, pendant_shade_mat));
 
+    const float cap_thickness = 0.02f;
+    add_box(Vec3(rod_cx - pendant_shade_r1 - 0.02f, pendant_shade_y1, rod_cz - pendant_shade_r1 - 0.02f),
+            Vec3(rod_cx + pendant_shade_r1 + 0.02f, pendant_shade_y1 + cap_thickness, rod_cz + pendant_shade_r1 + 0.02f),
+            metal_dark_mat);
     auto pendant_light_mat = std::make_shared<DiffuseLight>(
-        std::make_shared<SolidColor>(Color(48.0f, 44.0f, 36.0f)));
-    const float pendant_bulb_r = 0.085f;
-    const float pendant_bulb_y = pendant_shade_y0 + 0.30f;
+        std::make_shared<SolidColor>(Color(32.0f, 30.0f, 24.0f)));
+    const float pendant_bulb_r = 0.07f;
+    const float pendant_bulb_y = pendant_shade_y0 + 0.20f;
     auto pendant_bulb = std::make_shared<Sphere>(
         Vec3(rod_cx, pendant_bulb_y, rod_cz),
         pendant_bulb_r,
@@ -922,7 +1072,7 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     // Decorative wall art on right wall (normal points -X into the room)
     const float art_x = x1 - 0.01f;
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(art_x, 1.35f, -5.50f),
+        Vec3(art_x, 1.35f, -6.70f),
         Vec3(0.0f, 0.0f, 1.60f),
         Vec3(0.0f, 1.10f, 0.0f),
         mural_mat));
