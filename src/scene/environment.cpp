@@ -13,6 +13,10 @@ inline float luminance(const Color& c) {
     return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
 }
 
+inline float inv_two_pi() {
+    return 1.0f / (2.0f * kPi);
+}
+
 inline int clamp_int(int v, int lo, int hi) {
     return std::max(lo, std::min(v, hi));
 }
@@ -208,12 +212,8 @@ Color EnvironmentMap::Le(const Vec3& dir) const {
     const Vec3 d = normalize(dir);
     const float y = clamp_float(d.y, -1.0f, 1.0f);
     const float theta = std::acos(y);
-    float phi = std::atan2(d.z, d.x);
-    if (phi < 0.0f) {
-        phi += 2.0f * kPi;
-    }
-
-    const float u = phi * (1.0f / (2.0f * kPi));
+    const float phi = std::atan2(d.z, d.x) - rotation_y_rad_;
+    const float u = wrap01(phi * inv_two_pi());
     const float v = theta * (1.0f / kPi);
     return intensity_ * texel_bilinear(u, v);
 }
@@ -231,7 +231,7 @@ Vec3 EnvironmentMap::sample(float& out_pdf, RNG& rng) const {
     const float u = (static_cast<float>(col.index) + col.du) / static_cast<float>(width_);
     const float v = (static_cast<float>(row.index) + row.du) / static_cast<float>(height_);
 
-    const float phi = 2.0f * kPi * u;
+    const float phi = 2.0f * kPi * wrap01(u + rotation_y_rad_ * inv_two_pi());
     const float theta = kPi * v;
 
     const float sin_theta = std::sin(theta);
@@ -249,12 +249,8 @@ float EnvironmentMap::pdf(const Vec3& dir) const {
     const Vec3 d = normalize(dir);
     const float y = clamp_float(d.y, -1.0f, 1.0f);
     const float theta = std::acos(y);
-    float phi = std::atan2(d.z, d.x);
-    if (phi < 0.0f) {
-        phi += 2.0f * kPi;
-    }
-
-    const float u = phi * (1.0f / (2.0f * kPi));
+    const float phi = std::atan2(d.z, d.x) - rotation_y_rad_;
+    const float u = wrap01(phi * inv_two_pi());
     const float v = theta * (1.0f / kPi);
 
     const int ix = clamp_int(static_cast<int>(u * static_cast<float>(width_)), 0, width_ - 1);

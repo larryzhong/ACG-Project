@@ -53,6 +53,8 @@ struct Options {
     bool hide_env_bg_set = false;
     float env_intensity = 1.0f;
     bool env_intensity_set = false;
+    float env_rotation_deg = 0.0f;
+    bool env_rotation_set = false;
 
     bool turntable = false;
     int turntable_frames = 60;
@@ -86,6 +88,8 @@ void print_usage(const char* exe) {
         << "  --env <path>             HDR environment map (.hdr)\n"
         << "  --env-intensity <float>  HDR environment intensity multiplier (default: 1)\n"
         << "  --hdri-intensity <float> Alias for --env-intensity\n"
+        << "  --env-rotation <float>   HDR environment rotation in degrees around +Y (default: 0)\n"
+        << "  --hdri-rotation <float>  Alias for --env-rotation\n"
         << "  --hide-env-bg            Hide environment background (still lights the scene)\n"
         << "  --aperture <float>       Aperture diameter (0 disables DOF)\n"
         << "  --focus-dist <float>     Focus distance (<=0 uses |look_from-look_at|)\n"
@@ -163,6 +167,13 @@ bool parse_args(int argc, char** argv, Options& opt) {
                 return false;
             }
             opt.env_intensity_set = true;
+        } else if (arg == "--env-rotation" || arg == "--hdri-rotation") {
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.env_rotation_deg)) {
+                std::cerr << "Invalid " << arg << " value.\n";
+                return false;
+            }
+            opt.env_rotation_set = true;
         } else if (arg == "--hide-env-bg") {
             opt.hide_env_bg = true;
             opt.hide_env_bg_set = true;
@@ -508,12 +519,16 @@ int main(int argc, char** argv) {
             return 1;
         }
         scene.environment->set_intensity(opt.env_intensity);
+        scene.environment->set_rotation_deg(opt.env_rotation_deg);
     } else {
         if (opt.hide_env_bg) {
             std::cerr << "Warning: --hide-env-bg set without --env; rays escaping outside will render black.\n";
         }
         if (opt.env_intensity_set) {
             std::cerr << "Warning: --env-intensity set without --env; ignoring intensity.\n";
+        }
+        if (opt.env_rotation_set) {
+            std::cerr << "Warning: --env-rotation set without --env; ignoring rotation.\n";
         }
     }
     scene.hide_environment_background = opt.hide_env_bg;

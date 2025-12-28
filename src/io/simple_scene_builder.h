@@ -685,16 +685,24 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     add_lamp(3.65f, -7.00f); // far nightstand
 
     // TV on left wall + low cabinet (blue), facing into the room (+X).
-    add_box(Vec3(x0 + 0.10f, 0.0f, -6.25f), Vec3(x0 + 0.85f, 0.32f, -3.85f), cabinet_blue_mat);
+    add_box(Vec3(x0 + 0.10f, 0.0f, -5.65f), Vec3(x0 + 0.85f, 0.32f, -4.35f), cabinet_blue_mat);
 
-    // TV body (thin box, slightly inside the room)
-    add_box(Vec3(x0 + 0.05f, 0.65f, -6.05f), Vec3(x0 + 0.15f, 1.45f, -4.05f), tv_body_mat);
+    // TV (55 inch, 16:9 ratio: ~1.22m x 0.68m)
+    const float tv_w = 1.22f;
+    const float tv_h = 0.68f;
+    const float tv_cy = 1.10f;
+    const float tv_cz = -5.00f;
 
-    // TV screen (black for now), ensure normal points +X (into the room)
+    // TV body (frame)
+    add_box(Vec3(x0 + 0.05f, tv_cy - tv_h/2 - 0.04f, tv_cz - tv_w/2 - 0.04f),
+            Vec3(x0 + 0.12f, tv_cy + tv_h/2 + 0.04f, tv_cz + tv_w/2 + 0.04f),
+            tv_body_mat);
+
+    // TV screen (16:9, normal points +X)
     scene.objects.push_back(std::make_shared<Quad>(
-        Vec3(x0 + 0.151f, 0.70f, -6.00f),
-        Vec3(0.0f, 0.72f, 0.0f),
-        Vec3(0.0f, 0.0f, 1.90f),
+        Vec3(x0 + 0.121f, tv_cy - tv_h/2, tv_cz - tv_w/2),
+        Vec3(0.0f, tv_h, 0.0f),
+        Vec3(0.0f, 0.0f, tv_w),
         tv_screen_mat));
 
     // Floor lamp near left-front corner (realistic size)
