@@ -16,6 +16,9 @@ public:
 
     bool valid() const { return width_ > 0 && height_ > 0 && pixels_.size() == static_cast<size_t>(width_ * height_ * 3); }
 
+    void set_intensity(float intensity) { intensity_ = intensity; }
+    float intensity() const { return intensity_; }
+
     Color Le(const Vec3& dir) const;
 
     Vec3 sample(float& out_pdf, RNG& rng) const;
@@ -32,6 +35,8 @@ private:
     int height_ = 0;
     std::vector<float> pixels_;
 
+    float intensity_ = 1.0f;
+
     float total_weight_ = 0.0f;
     std::vector<float> weights_;
     std::vector<float> marginal_cdf_;
@@ -39,4 +44,3 @@ private:
 };
 
 using EnvironmentMapPtr = std::shared_ptr<EnvironmentMap>;
-

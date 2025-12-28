@@ -51,6 +51,8 @@ struct Options {
     std::string env_path;
     bool hide_env_bg = false;
     bool hide_env_bg_set = false;
+    float env_intensity = 1.0f;
+    bool env_intensity_set = false;
 
     bool turntable = false;
     int turntable_frames = 60;
@@ -81,7 +83,9 @@ void print_usage(const char* exe) {
         << "  --height <int>           Image height\n"
         << "  --spp <int>              Samples per pixel\n"
         << "  --max-depth <int>        Path tracer max depth\n"
-        << "  --env <path>             HDR environment map\n"
+        << "  --env <path>             HDR environment map (.hdr)\n"
+        << "  --env-intensity <float>  HDR environment intensity multiplier (default: 1)\n"
+        << "  --hdri-intensity <float> Alias for --env-intensity\n"
         << "  --hide-env-bg            Hide environment background (still lights the scene)\n"
         << "  --aperture <float>       Aperture diameter (0 disables DOF)\n"
         << "  --focus-dist <float>     Focus distance (<=0 uses |look_from-look_at|)\n"
@@ -152,6 +156,13 @@ bool parse_args(int argc, char** argv, Options& opt) {
         } else if (arg == "--env") {
             if (i + 1 >= argc) { missing_value(1); return false; }
             opt.env_path = argv[++i];
+        } else if (arg == "--env-intensity" || arg == "--hdri-intensity") {
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.env_intensity)) {
+                std::cerr << "Invalid " << arg << " value.\n";
+                return false;
+            }
+            opt.env_intensity_set = true;
         } else if (arg == "--hide-env-bg") {
             opt.hide_env_bg = true;
             opt.hide_env_bg_set = true;
@@ -311,6 +322,10 @@ int main(int argc, char** argv) {
     }
     if (opt.aperture < 0.0f) {
         std::cerr << "Invalid --aperture value (must be >= 0).\n";
+        return 1;
+    }
+    if (opt.env_intensity < 0.0f) {
+        std::cerr << "Invalid --env-intensity value (must be >= 0).\n";
         return 1;
     }
     if (opt.shutter_close < opt.shutter_open) {
@@ -492,8 +507,14 @@ int main(int argc, char** argv) {
             if (!env_error.empty()) std::cerr << env_error << "\n";
             return 1;
         }
-    } else if (opt.hide_env_bg) {
-        std::cerr << "Warning: --hide-env-bg set without --env; rays escaping outside will render black.\n";
+        scene.environment->set_intensity(opt.env_intensity);
+    } else {
+        if (opt.hide_env_bg) {
+            std::cerr << "Warning: --hide-env-bg set without --env; rays escaping outside will render black.\n";
+        }
+        if (opt.env_intensity_set) {
+            std::cerr << "Warning: --env-intensity set without --env; ignoring intensity.\n";
+        }
     }
     scene.hide_environment_background = opt.hide_env_bg;
 

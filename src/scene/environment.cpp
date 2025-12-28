@@ -215,7 +215,7 @@ Color EnvironmentMap::Le(const Vec3& dir) const {
 
     const float u = phi * (1.0f / (2.0f * kPi));
     const float v = theta * (1.0f / kPi);
-    return texel_bilinear(u, v);
+    return intensity_ * texel_bilinear(u, v);
 }
 
 Vec3 EnvironmentMap::sample(float& out_pdf, RNG& rng) const {
@@ -281,4 +281,3 @@ float EnvironmentMap::pdf(const Vec3& dir) const {
     const float p_pixel = w / total_weight_;
     return p_pixel / pixel_solid_angle;
 }
-
