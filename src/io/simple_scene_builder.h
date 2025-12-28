@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/color.h"
+#include "io/obj_loader.h"
 #include "scene/material.h"
 #include "scene/mesh.h"
 #include "scene/moving_sphere.h"
@@ -660,6 +661,98 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     add_box(Vec3(0.85f, 0.0f, -6.70f), Vec3(3.65f, 0.30f, -3.30f), bed_frame_mat);
     // Mattress
     add_box(Vec3(0.95f, 0.30f, -6.60f), Vec3(3.55f, 0.65f, -3.40f), bedding_mat);
+    // Pillow (OBJ)
+    // Loads ../assets/models/Pillow.obj and auto-scales it to a reasonable size.
+    {
+        const std::string pillow_path = "../assets/models/Pillow.obj";
+        std::vector<ObjMesh> pillow_meshes;
+        std::string pillow_error;
+
+        if (load_obj_meshes(pillow_path, pillow_meshes, &pillow_error)) {
+            bool bbox_init = false;
+            AABB pillow_bbox(Vec3(0.0f), Vec3(0.0f));
+
+            for (const auto& m : pillow_meshes) {
+                if (!m.data) continue;
+                const AABB b = m.data->bounding_box();
+                if (!bbox_init) {
+                    pillow_bbox = b;
+                    bbox_init = true;
+                } else {
+                    pillow_bbox = surrounding_box(pillow_bbox, b);
+                }
+            }
+
+            if (bbox_init) {
+                const Vec3 ext = pillow_bbox.max - pillow_bbox.min;
+                const float horiz_max = (ext.x > ext.z) ? ext.x : ext.z;
+                const float pillow_target_len = 0.85f; // world units
+                const float scale = (horiz_max > 1e-12f) ? (pillow_target_len / horiz_max) : 1.0f;
+
+                const float pi = 3.14159265358979323846f;
+                const float rot_y = (ext.x > ext.z) ? (0.5f * pi) : 0.0f;
+
+                // Make pillow stand up: rotate the longest axis to +Y.
+                Transform upright = Transform::identity();
+                if (ext.x >= ext.y && ext.x >= ext.z) {
+                    upright = Transform::rotate_z(-0.5f * pi); // X -> Y
+                } else if (ext.z >= ext.x && ext.z >= ext.y) {
+                    upright = Transform::rotate_x(0.5f * pi);  // Z -> Y
+                }
+
+                // Lean slightly toward -X so it "rests" on the bedside table.
+                const float lean = -0.20f;
+
+                const Vec3 center_obj = (pillow_bbox.min + pillow_bbox.max) * 0.5f;
+                const Transform base = Transform::rotate_z(lean) * upright * Transform::rotate_y(rot_y) *
+                                      Transform::uniform_scale(scale);
+                const Vec3 center_base = base.apply_point(center_obj);
+
+                // Compute bbox after rotation+scale so we can place it reliably on the mattress.
+                const Vec3 p000(pillow_bbox.min.x, pillow_bbox.min.y, pillow_bbox.min.z);
+                const Vec3 p001(pillow_bbox.min.x, pillow_bbox.min.y, pillow_bbox.max.z);
+                const Vec3 p010(pillow_bbox.min.x, pillow_bbox.max.y, pillow_bbox.min.z);
+                const Vec3 p011(pillow_bbox.min.x, pillow_bbox.max.y, pillow_bbox.max.z);
+                const Vec3 p100(pillow_bbox.max.x, pillow_bbox.min.y, pillow_bbox.min.z);
+                const Vec3 p101(pillow_bbox.max.x, pillow_bbox.min.y, pillow_bbox.max.z);
+                const Vec3 p110(pillow_bbox.max.x, pillow_bbox.max.y, pillow_bbox.min.z);
+                const Vec3 p111(pillow_bbox.max.x, pillow_bbox.max.y, pillow_bbox.max.z);
+
+                Vec3 tp[8] = {
+                    base.apply_point(p000), base.apply_point(p001), base.apply_point(p010), base.apply_point(p011),
+                    base.apply_point(p100), base.apply_point(p101), base.apply_point(p110), base.apply_point(p111),
+                };
+                Vec3 base_min = tp[0];
+                for (int i = 1; i < 8; ++i) {
+                    base_min.x = std::min(base_min.x, tp[i].x);
+                    base_min.y = std::min(base_min.y, tp[i].y);
+                    base_min.z = std::min(base_min.z, tp[i].z);
+                }
+
+                const float mattress_top_y = 0.65f;
+                const float clearance = -0.06f;
+
+                // Place pillow near the near (camera-side) nightstand and lean into it.
+                const float desired_cx = 3.45f;
+                const float desired_cz = -4.90f;
+
+                const float tx = desired_cx - center_base.x;
+                const float tz = desired_cz - center_base.z;
+                const float ty = (mattress_top_y + clearance) - base_min.y;
+
+                const Transform pillow_tr = Transform::translate(Vec3(tx, ty, tz)) * base;
+
+                for (const auto& m : pillow_meshes) {
+                    if (!m.data) continue;
+                    auto obj = std::make_shared<Mesh>(m.data, pillow_tr, m.material);
+                    scene.objects.push_back(obj);
+                    if (m.emissive) {
+                        scene.lights.add_area_light(obj);
+                    }
+                }
+            }
+        }
+    }
     // Headboard (against right wall side, thickness on +X)
     add_box(Vec3(3.65f, 0.0f, -6.75f), Vec3(3.85f, 1.35f, -3.25f), headboard_mat);
 
