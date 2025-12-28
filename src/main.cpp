@@ -459,7 +459,7 @@ int main(int argc, char** argv) {
         // Camera: straight view facing the window (not diagonal).
         cam_settings.look_from = Vec3(0.0f, 1.30f, 0.80f);
         cam_settings.look_at   = Vec3(0.0f, 1.30f, -5.00f);
-        cam_settings.vertical_fov_deg = 55.0f;
+        cam_settings.vertical_fov_deg = 60.0f;
     } else {
         std::cerr << "Unknown scene name: " << opt.scene_name << "\n";
         return 1;

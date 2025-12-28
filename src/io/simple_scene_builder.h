@@ -697,23 +697,23 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
         Vec3(0.0f, 0.0f, 1.90f),
         tv_screen_mat));
 
-    // Floor lamp near left-front corner (smaller, more realistic)
+    // Floor lamp near left-front corner (realistic size)
     auto lamp_shade_mat = std::make_shared<Lambertian>(
         std::make_shared<SolidColor>(Color(0.86f, 0.86f, 0.84f)));
     auto lamp_pole_mat = metal_dark_mat;
 
-    // Pole (thinner)
-    add_box(Vec3(-3.63f, 0.0f, 0.16f), Vec3(-3.57f, 1.45f, 0.22f), lamp_pole_mat);
-    // Shade (smaller box)
-    add_box(Vec3(-3.72f, 1.38f, 0.06f), Vec3(-3.48f, 1.58f, 0.32f), lamp_shade_mat);
+    // Pole
+    add_box(Vec3(-3.62f, 0.0f, 0.17f), Vec3(-3.58f, 1.42f, 0.21f), lamp_pole_mat);
+    // Shade (small)
+    add_box(Vec3(-3.68f, 1.40f, 0.11f), Vec3(-3.52f, 1.52f, 0.27f), lamp_shade_mat);
 
-    // Light inside shade (warm)
+    // Light inside shade
     auto floorlamp_light_mat = std::make_shared<DiffuseLight>(
         std::make_shared<SolidColor>(Color(7.0f, 6.0f, 4.8f)));
     auto floorlamp = std::make_shared<Quad>(
-        Vec3(-3.68f, 1.38f, 0.10f),
-        Vec3(0.16f, 0.0f, 0.0f),
-        Vec3(0.0f, 0.0f, 0.16f),
+        Vec3(-3.66f, 1.40f, 0.13f),
+        Vec3(0.12f, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, 0.12f),
         floorlamp_light_mat);
     scene.objects.push_back(floorlamp);
     scene.lights.add_area_light(floorlamp);
