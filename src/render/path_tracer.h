@@ -617,10 +617,9 @@ inline void render_image_with_gbuffer(const Scene& scene,
                             continue;
                         }
 
-                        const Vec3 n = material ? material->get_shading_normal(rec) : rec.normal;
-                        normal_sum += normalize(n);
+                        normal_sum += normalize(rec.normal);
                         albedo_sum += material ? material->albedo(rec) : Color(0.0f);
-                        depth_sum += rec.t;
+                        depth_sum += dot(rec.point - camera.origin(), camera.forward());
                         ++hit_count;
                         break;
                     }
