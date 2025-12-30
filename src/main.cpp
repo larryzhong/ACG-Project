@@ -85,7 +85,7 @@ void print_usage(const char* exe) {
     std::cerr
         << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
         << "Options:\n"
-        << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
+        << "  --scene <name>           Built-in scene (simple|simple_pbr|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
         << "  --gltf <path>            glTF file (scene 'gltf') OR outside model (scene 'hotel')\n"
         << "  --plant-gltf <path>      Indoor plant glTF (scene 'hotel' only)\n"
         << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
@@ -422,6 +422,11 @@ int main(int argc, char** argv) {
     // -------------------------
     if (opt.scene_name == "simple") {
         scene = build_simple_scene_basic();
+        cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
+        cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
+        cam_settings.vertical_fov_deg = 45.0f;
+    } else if (opt.scene_name == "simple_pbr") {
+        scene = build_simple_scene_pbr();
         cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
         cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
         cam_settings.vertical_fov_deg = 45.0f;

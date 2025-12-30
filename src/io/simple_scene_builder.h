@@ -139,6 +139,133 @@ inline Scene build_simple_scene_basic() {
 }
 
 // ==========================================
+// Scene 1b: Principled BSDF Showcase
+// ==========================================
+inline Scene build_simple_scene_pbr() {
+    Scene scene;
+
+    // Cornell-style box to keep lighting controlled and make BRDF differences obvious.
+    auto white_tex = std::make_shared<SolidColor>(Color(0.73f, 0.73f, 0.73f));
+    auto red_tex = std::make_shared<SolidColor>(Color(0.65f, 0.05f, 0.05f));
+    auto green_tex = std::make_shared<SolidColor>(Color(0.12f, 0.45f, 0.15f));
+
+    auto white = std::make_shared<Lambertian>(white_tex);
+    auto red = std::make_shared<Lambertian>(red_tex);
+    auto green = std::make_shared<Lambertian>(green_tex);
+
+    // Main light (bright)
+    auto light_tex = std::make_shared<SolidColor>(Color(15.0f, 15.0f, 15.0f));
+    auto light_mat = std::make_shared<DiffuseLight>(light_tex);
+
+    // Fill light (dimmer) for the area behind the camera
+    auto fill_light_tex = std::make_shared<SolidColor>(Color(5.0f, 5.0f, 5.0f));
+    auto fill_light_mat = std::make_shared<DiffuseLight>(fill_light_tex);
+
+    const float x0 = -1.0f, x1 = 1.0f;
+    const float y0 = 0.0f, y1 = 2.0f;
+    const float z_box_back = -2.0f;
+    const float z_studio_back = 4.0f; // Wall behind camera
+
+    // Floor (checker)
+    auto floor_even = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
+    auto floor_odd = std::make_shared<SolidColor>(Color(0.3f, 0.3f, 0.3f));
+    auto floor_checker = std::make_shared<CheckerTexture>(floor_even, floor_odd, 2.0f);
+    auto floor_mat = std::make_shared<Lambertian>(floor_checker);
+
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z_box_back),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back),
+        floor_mat));
+
+    // Ceiling
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y1, z_box_back),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back),
+        white));
+
+    // Back wall
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z_box_back),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        white));
+
+    // Left wall (red)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z_studio_back),
+        Vec3(0.0f, 0.0f, z_box_back - z_studio_back),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        red));
+
+    // Right wall (green)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x1, y0, z_box_back),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        green));
+
+    // Studio back wall (behind camera)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z_studio_back),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        white));
+
+    // Lights
+    const float lx0 = -0.3f, lx1 = 0.3f;
+    const float lz0 = -1.3f, lz1 = -0.7f;
+    const float ly = y1 - 0.001f;
+
+    auto ceiling_light = std::make_shared<Quad>(
+        Vec3(lx0, ly, lz0),
+        Vec3(lx1 - lx0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, lz1 - lz0),
+        light_mat);
+    scene.objects.push_back(ceiling_light);
+    scene.lights.add_area_light(ceiling_light);
+
+    auto studio_light = std::make_shared<Quad>(
+        Vec3(lx0, ly, 1.8f),
+        Vec3(lx1 - lx0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, 0.6f),
+        fill_light_mat);
+    scene.objects.push_back(studio_light);
+    scene.lights.add_area_light(studio_light);
+
+    // --- Objects (Principled BSDF) ---
+    // 1) Dielectric-like plastic: metallic=0, medium roughness
+    auto plastic_base = std::make_shared<SolidColor>(Color(0.20f, 0.55f, 0.85f));
+    auto plastic = std::make_shared<PrincipledBSDF>(
+        plastic_base, 0.0f, nullptr, 0.30f, nullptr, nullptr, 1.0f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(-0.55f, 0.35f, -0.85f), 0.35f, plastic));
+
+    // 2) Metallic: metallic=1, smoother surface for a strong specular lobe
+    auto metal_base = std::make_shared<SolidColor>(Color(0.95f, 0.78f, 0.55f)); // warm metal tint
+    auto smooth_metal = std::make_shared<PrincipledBSDF>(
+        metal_base, 1.0f, nullptr, 0.12f, nullptr, nullptr, 1.0f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.55f, 0.35f, -0.95f), 0.35f, smooth_metal));
+
+    // 3) Textured + normal-mapped Principled: makes shading normal + mipmaps visible
+    auto earth_tex = std::make_shared<ImageTexture>("../assets/textures/2k_earth_daymap.jpg");
+    auto earth_normal = std::make_shared<NormalMapTexture>("../assets/textures/2k_earth_normal.png");
+    auto earth = std::make_shared<PrincipledBSDF>(
+        earth_tex, 0.0f, nullptr, 0.65f, nullptr, earth_normal, 1.0f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.0f, 0.55f, -1.45f), 0.30f, earth));
+
+    // 4) Glass (kept as dielectric for refraction; contrasts with Principled metal/plastic)
+    auto glass = std::make_shared<Dielectric>(1.5f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.05f, 0.23f, -0.35f), 0.23f, glass));
+
+    return scene;
+}
+
+// ==========================================
 // Scene 2: Depth of Field Test (Improved)
 // ==========================================
 inline Scene build_dof_scene() {
