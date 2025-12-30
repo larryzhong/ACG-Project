@@ -601,6 +601,237 @@ private:
     float attenuation_distance_ = std::numeric_limits<float>::infinity();
 };
 
+// Mix of diffuse reflection and dielectric reflection/refraction.
+// This is a simple reference material (not physically exact), intended for comparisons.
+class DiffuseDielectricMix : public Material {
+public:
+    DiffuseDielectricMix(float index_of_refraction,
+                         const TexturePtr& diffuse_albedo,
+                         const TexturePtr& transmittance,
+                         float transmission_weight)
+        : ir_(index_of_refraction),
+          diffuse_albedo_(diffuse_albedo),
+          transmittance_(transmittance),
+          transmission_weight_(clamp_float(transmission_weight, 0.0f, 1.0f)) {}
+
+    Color eval(const Vec3& /*wo*/, const Vec3& wi, const HitRecord& hit) const override {
+        const Vec3 n = get_shading_normal(hit);
+        if (dot(n, wi) <= 0.0f) {
+            return Color(0.0f);
+        }
+        const float w_diff = 1.0f - transmission_weight_;
+        const Color a = diffuse_albedo_ ? diffuse_albedo_->value(hit) : Color(1.0f);
+        return w_diff * a * (1.0f / kPi);
+    }
+
+    float pdf(const Vec3& /*wo*/, const Vec3& wi, const HitRecord& hit) const override {
+        const Vec3 n = get_shading_normal(hit);
+        const float cosine = dot(n, wi);
+        if (cosine <= 0.0f) {
+            return 0.0f;
+        }
+        const float w_diff = 1.0f - transmission_weight_;
+        return w_diff * cosine * (1.0f / kPi);
+    }
+
+    bool sample(const Vec3& wo,
+                const HitRecord& hit,
+                Vec3& wi,
+                float& out_pdf,
+                Color& out_f,
+                bool& out_is_delta,
+                RNG& rng) const override {
+        const Vec3 n = get_shading_normal(hit);
+
+        // Sample dielectric lobe (delta reflection/refraction).
+        if (transmission_weight_ > 0.0f && rng.uniform() < transmission_weight_) {
+            const Vec3 incident = normalize(-wo);
+            const float refraction_ratio = hit.front_face ? (1.0f / ir_) : ir_;
+
+            const float cos_theta = std::fmin(-dot(incident, n), 1.0f);
+            const float sin_theta = std::sqrt(std::max(0.0f, 1.0f - cos_theta * cos_theta));
+
+            const bool cannot_refract = (refraction_ratio * sin_theta > 1.0f);
+            const float reflect_prob = schlick(cos_theta, ir_);
+
+            Vec3 direction;
+            bool did_refract = false;
+            if (cannot_refract || rng.uniform() < reflect_prob) {
+                direction = reflect(incident, n);
+            } else {
+                direction = refract(incident, n, refraction_ratio);
+                if (direction.length_squared() < 1e-10f) {
+                    direction = reflect(incident, n);
+                } else {
+                    did_refract = true;
+                }
+            }
+
+            wi = normalize(direction);
+            out_is_delta = true;
+            out_pdf = transmission_weight_;
+
+            const float abs_cos = std::max(1e-6f, abs_dot(n, wi));
+            Color Tr(1.0f);
+            if (did_refract && transmittance_) {
+                const Color t = transmittance_->value(hit);
+                Tr = Color(clamp_float(t.x, 0.0f, 1.0f),
+                           clamp_float(t.y, 0.0f, 1.0f),
+                           clamp_float(t.z, 0.0f, 1.0f));
+            }
+
+            out_f = transmission_weight_ * Tr * (1.0f / abs_cos);
+            return true;
+        }
+
+        // Sample diffuse lobe.
+        const float w_diff = 1.0f - transmission_weight_;
+        if (w_diff <= 0.0f) {
+            return false;
+        }
+
+        ONB uvw;
+        uvw.build_from_w(n);
+        wi = uvw.local(random_cosine_direction(rng));
+
+        const float cosine = dot(n, wi);
+        if (cosine <= 0.0f) {
+            return false;
+        }
+
+        out_is_delta = false;
+        out_pdf = w_diff * cosine * (1.0f / kPi);
+        const Color a = diffuse_albedo_ ? diffuse_albedo_->value(hit) : Color(1.0f);
+        out_f = w_diff * a * (1.0f / kPi);
+        return out_pdf > 0.0f;
+    }
+
+    float cone_roughness(const HitRecord& /*hit*/) const override {
+        return 1.0f;
+    }
+
+private:
+    static float schlick(float cosine, float ref_idx) {
+        float r0 = (1.0f - ref_idx) / (1.0f + ref_idx);
+        r0 = r0 * r0;
+        return r0 + (1.0f - r0) * std::pow(1.0f - cosine, 5.0f);
+    }
+
+    float ir_ = 1.5f;
+    TexturePtr diffuse_albedo_;
+    TexturePtr transmittance_;
+    float transmission_weight_ = 0.0f;
+};
+
+// Mix of diffuse reflection and refraction-only transmission (NO specular reflection).
+// Intentionally non-physical: real dielectrics always have Fresnel reflection.
+// Useful as a reference material when you want transmission without mirror-like highlights.
+class DiffuseRefractionOnlyMix : public Material {
+public:
+    DiffuseRefractionOnlyMix(float index_of_refraction,
+                             const TexturePtr& diffuse_albedo,
+                             const TexturePtr& transmittance,
+                             float transmission_weight)
+        : ir_(index_of_refraction),
+          diffuse_albedo_(diffuse_albedo),
+          transmittance_(transmittance),
+          transmission_weight_(clamp_float(transmission_weight, 0.0f, 1.0f)) {}
+
+    Color eval(const Vec3& /*wo*/, const Vec3& wi, const HitRecord& hit) const override {
+        const Vec3 n = get_shading_normal(hit);
+        if (dot(n, wi) <= 0.0f) {
+            return Color(0.0f);
+        }
+        const float w_diff = 1.0f - transmission_weight_;
+        const Color a = diffuse_albedo_ ? diffuse_albedo_->value(hit) : Color(1.0f);
+        return w_diff * a * (1.0f / kPi);
+    }
+
+    float pdf(const Vec3& /*wo*/, const Vec3& wi, const HitRecord& hit) const override {
+        const Vec3 n = get_shading_normal(hit);
+        const float cosine = dot(n, wi);
+        if (cosine <= 0.0f) {
+            return 0.0f;
+        }
+        const float w_diff = 1.0f - transmission_weight_;
+        return w_diff * cosine * (1.0f / kPi);
+    }
+
+    bool sample(const Vec3& wo,
+                const HitRecord& hit,
+                Vec3& wi,
+                float& out_pdf,
+                Color& out_f,
+                bool& out_is_delta,
+                RNG& rng) const override {
+        const Vec3 n = get_shading_normal(hit);
+
+        // Transmission lobe (delta): refraction only.
+        if (transmission_weight_ > 0.0f && rng.uniform() < transmission_weight_) {
+            const Vec3 incident = normalize(-wo);
+            const float refraction_ratio = hit.front_face ? (1.0f / ir_) : ir_;
+
+            const float cos_theta = std::fmin(-dot(incident, n), 1.0f);
+            const float sin_theta = std::sqrt(std::max(0.0f, 1.0f - cos_theta * cos_theta));
+            const bool cannot_refract = (refraction_ratio * sin_theta > 1.0f);
+
+            if (!cannot_refract) {
+                Vec3 direction = refract(incident, n, refraction_ratio);
+                if (direction.length_squared() > 1e-10f) {
+                    wi = normalize(direction);
+                    out_is_delta = true;
+                    out_pdf = transmission_weight_;
+
+                    const float abs_cos = std::max(1e-6f, abs_dot(n, wi));
+                    Color Tr(1.0f);
+                    if (transmittance_) {
+                        const Color t = transmittance_->value(hit);
+                        Tr = Color(clamp_float(t.x, 0.0f, 1.0f),
+                                   clamp_float(t.y, 0.0f, 1.0f),
+                                   clamp_float(t.z, 0.0f, 1.0f));
+                    }
+
+                    out_f = transmission_weight_ * Tr * (1.0f / abs_cos);
+                    return true;
+                }
+            }
+
+            // If refraction is impossible (e.g. TIR), fall back to diffuse (no reflection).
+        }
+
+        // Diffuse lobe.
+        const float w_diff = 1.0f - transmission_weight_;
+        if (w_diff <= 0.0f) {
+            return false;
+        }
+
+        ONB uvw;
+        uvw.build_from_w(n);
+        wi = uvw.local(random_cosine_direction(rng));
+
+        const float cosine = dot(n, wi);
+        if (cosine <= 0.0f) {
+            return false;
+        }
+
+        out_is_delta = false;
+        out_pdf = w_diff * cosine * (1.0f / kPi);
+        const Color a = diffuse_albedo_ ? diffuse_albedo_->value(hit) : Color(1.0f);
+        out_f = w_diff * a * (1.0f / kPi);
+        return out_pdf > 0.0f;
+    }
+
+    float cone_roughness(const HitRecord& /*hit*/) const override {
+        return 1.0f;
+    }
+
+private:
+    float ir_ = 1.5f;
+    TexturePtr diffuse_albedo_;
+    TexturePtr transmittance_;
+    float transmission_weight_ = 0.0f;
+};
+
 class NormalMappedLambertian : public Material {
 public:
     NormalMappedLambertian(const TexturePtr& albedo, const NormalMapPtr& normal_map, float strength = 1.0f)

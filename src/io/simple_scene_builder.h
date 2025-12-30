@@ -9,11 +9,13 @@
 #include "io/gltf_loader.h"
 #include "io/obj_loader.h"
 #include "scene/material.h"
+#include "scene/medium.h"
 #include "scene/mesh.h"
 #include "scene/moving_sphere.h"
 #include "scene/quad.h"
 #include "scene/scene.h"
 #include "scene/sphere.h"
+#include "scene/subsurface.h"
 #include "scene/texture.h"
 
 namespace simple_scene_builder_detail {
@@ -199,6 +201,73 @@ inline Scene build_simple_scene_basic() {
         std::make_shared<Sphere>(Vec3(0.0f, 0.25f, -1.5f), 0.25f, blue_mat));
 
     return scene;
+}
+
+// ==========================================
+// Scene: Homogeneous Fog Test
+// ==========================================
+inline Scene build_fog_scene() {
+    Scene scene = build_simple_scene_basic();
+
+    // A mild homogeneous fog. Increase sigma_s for more visible shafts,
+    // increase sigma_a to darken the fog.
+    scene.global_medium = std::make_shared<HomogeneousMedium>(0.3f, 0.06f);
+
+    return scene;
+}
+
+// ==========================================
+// Scene: Subsurface Scattering Test (Solid Translucent)
+// ==========================================
+namespace simple_scene_builder_detail {
+inline Scene build_sss_scene_impl() {
+    Scene scene;
+
+    // Materials
+    auto ground_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.35f, 0.35f, 0.35f)));
+    auto wall_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.55f, 0.55f, 0.55f)));
+
+    auto wax_albedo = std::make_shared<SolidColor>(Color(1.00f, 0.30f, 0.30f));
+    MaterialPtr wax = std::make_shared<SubsurfaceRandomWalkMaterial>(
+        wax_albedo,
+        0.02f,  // sigma_s (more scattering)
+        0.99f,  // sigma_a
+        160,    // max steps (less bias / less noise)
+        60.0f); // max distance
+
+    auto light_tex = std::make_shared<SolidColor>(Color(20.0f, 20.0f, 20.0f));
+    auto light_mat = std::make_shared<DiffuseLight>(light_tex);
+
+    // Geometry (simple studio)
+    // Ground (y = 0), facing +Y
+    // scene.objects.push_back(std::make_shared<Quad>(
+    //     Vec3(-10.0f, 0.0f, 10.0f),
+    //     Vec3(20.0f, 0.0f, 0.0f),
+    //     Vec3(0.0f, 0.0f, -20.0f),
+    //     ground_mat));
+
+    // Area light behind the sphere (facing +Z)
+    // Slightly lower than before to emphasize back-lit scatter.
+    auto light = std::make_shared<Quad>(
+        Vec3(-0.35f, 0.55f, -2.8f),
+        Vec3(0.7f, 0.0f, 0.0f),
+        Vec3(0.0f, 0.7f, 0.0f),
+        light_mat);
+    scene.objects.push_back(light);
+    scene.lights.add_area_light(light);
+
+    // The sphere
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.0f, 0.65f, -1.4f), 0.65f, wax));
+
+    return scene;
+}
+} // namespace simple_scene_builder_detail
+
+inline Scene build_sss_scene() {
+    return simple_scene_builder_detail::build_sss_scene_impl();
 }
 
 // ==========================================
@@ -1191,18 +1260,18 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
             Vec3(table_x1 - 0.06f, tbl_shelf_y + tbl_shelf_thick, table_z1 - 0.06f),
             table_wood_mat);
 
-    // Coffee cup on the coffee table
-    {
-        std::string cup_err;
-        const std::string cup_path = "../assets/cup.gltf";
+    // // Coffee cup on the coffee table
+    // {
+    //     std::string cup_err;
+    //     const std::string cup_path = "../assets/cup.gltf";
 
-        // Place near the center of the tabletop, slightly above to avoid z-fighting.
-        const float tabletop_y = table_h;
-        const Vec3 cup_pos(table_cx, tabletop_y + 0.001f, table_cz);
+    //     // Place near the center of the tabletop, slightly above to avoid z-fighting.
+    //     const float tabletop_y = table_h;
+    //     const Vec3 cup_pos(table_cx, tabletop_y + 0.001f, table_cz);
 
-        // Typical cup height in this scene scale. (2x)
-        (void)simple_scene_builder_detail::add_scaled_gltf_to_scene(scene, cup_path, cup_pos, 0.14f, &cup_err);
-    }
+    //     // Typical cup height in this scene scale. (2x)
+    //     (void)simple_scene_builder_detail::add_scaled_gltf_to_scene(scene, cup_path, cup_pos, 0.14f, &cup_err);
+    // }
     
     // Floor lamp near left-front corner (realistic size)
     auto lamp_shade_mat = std::make_shared<Lambertian>(

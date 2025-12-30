@@ -77,7 +77,7 @@ void print_usage(const char* exe) {
     std::cerr
         << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
         << "Options:\n"
-        << "  --scene <name>           Built-in scene (simple|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
+            << "  --scene <name>           Built-in scene (simple|fog|sss|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
         << "  --gltf <path>            glTF file (scene 'gltf') OR outside model (scene 'hotel')\n"
         << "  --plant-gltf <path>      Indoor plant glTF (scene 'hotel' only)\n"
         << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
@@ -369,6 +369,17 @@ int main(int argc, char** argv) {
         cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
         cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
         cam_settings.vertical_fov_deg = 45.0f;
+    } else if (opt.scene_name == "fog") {
+        scene = build_fog_scene();
+        cam_settings.look_from = Vec3(0.0f, 1.0f, 2.5f);
+        cam_settings.look_at = Vec3(0.0f, 1.0f, -1.0f);
+        cam_settings.vertical_fov_deg = 45.0f;
+    } else if (opt.scene_name == "sss") {
+        scene = build_sss_scene();
+        // Place camera opposite the light (light is behind the sphere at negative Z).
+        cam_settings.look_from = Vec3(0.0f, 1.15f, 2.8f);
+        cam_settings.look_at = Vec3(0.0f, 0.65f, -1.4f);
+        cam_settings.vertical_fov_deg = 40.0f;
     } else if (opt.scene_name == "dof") {
         scene = build_dof_scene();
         cam_settings.look_from = Vec3(0.0f, 2.0f, 2.5f);

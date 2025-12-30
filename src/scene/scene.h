@@ -8,12 +8,15 @@
 #include "scene/hittable.h"
 #include "scene/light.h"
 
+class Medium;
+
 class Scene {
 public:
     std::vector<HittablePtr> objects;
     HittablePtr accel;
     LightCollection lights;
     EnvironmentMapPtr environment;
+    std::shared_ptr<Medium> global_medium;
     bool hide_environment_background = false;
 
     void build_bvh() {
