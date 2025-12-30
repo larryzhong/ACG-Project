@@ -16,6 +16,7 @@
 #include "io/gltf_loader.h"
 #include "io/simple_scene_builder.h"
 #include "render/film.h"
+#include "render/denoiser.h"
 #include "render/path_tracer.h"
 #include "scene/scene.h"
 
@@ -36,6 +37,13 @@ struct Options {
     float focus_dist = 0.0f;
     float shutter_open = 0.0f;
     float shutter_close = 1.0f;
+
+    bool denoise = false;
+    bool denoise_set = false;
+    int denoise_iterations = 5;
+    float denoise_sigma_depth = 0.05f;
+    float denoise_sigma_normal = 0.25f;
+    float denoise_sigma_albedo = 0.25f;
 
     std::string output = "bedroom.png";
     std::string scene_name = "hotel";
@@ -85,6 +93,12 @@ void print_usage(const char* exe) {
         << "  --height <int>           Image height\n"
         << "  --spp <int>              Samples per pixel\n"
         << "  --max-depth <int>        Path tracer max depth\n"
+        << "  --denoise                Enable G-buffer guided denoiser (default: auto for low SPP)\n"
+        << "  --no-denoise             Disable denoiser\n"
+        << "  --denoise-iterations <i> Denoiser iterations (default: 5)\n"
+        << "  --denoise-sigma-depth <f>  Relative depth sigma (default: 0.05)\n"
+        << "  --denoise-sigma-normal <f> Normal sigma (default: 0.25)\n"
+        << "  --denoise-sigma-albedo <f> Albedo sigma (default: 0.25)\n"
         << "  --env <path>             HDR environment map (.hdr)\n"
         << "  --env-intensity <float>  HDR environment intensity multiplier (default: 1)\n"
         << "  --hdri-intensity <float> Alias for --env-intensity\n"
@@ -185,6 +199,36 @@ bool parse_args(int argc, char** argv, Options& opt) {
             if (i + 1 >= argc) { missing_value(1); return false; }
             if (!parse_int_arg(argv[++i], opt.max_depth)) { std::cerr << "Invalid --max-depth value.\n"; return false; }
             opt.max_depth_set = true;
+        } else if (arg == "--denoise") {
+            opt.denoise = true;
+            opt.denoise_set = true;
+        } else if (arg == "--no-denoise") {
+            opt.denoise = false;
+            opt.denoise_set = true;
+        } else if (arg == "--denoise-iterations") {
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_int_arg(argv[++i], opt.denoise_iterations)) {
+                std::cerr << "Invalid --denoise-iterations value.\n";
+                return false;
+            }
+        } else if (arg == "--denoise-sigma-depth") {
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.denoise_sigma_depth)) {
+                std::cerr << "Invalid --denoise-sigma-depth value.\n";
+                return false;
+            }
+        } else if (arg == "--denoise-sigma-normal") {
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.denoise_sigma_normal)) {
+                std::cerr << "Invalid --denoise-sigma-normal value.\n";
+                return false;
+            }
+        } else if (arg == "--denoise-sigma-albedo") {
+            if (i + 1 >= argc) { missing_value(1); return false; }
+            if (!parse_float_arg(argv[++i], opt.denoise_sigma_albedo)) {
+                std::cerr << "Invalid --denoise-sigma-albedo value.\n";
+                return false;
+            }
         } else if (arg == "--aperture") {
             if (i + 1 >= argc) { missing_value(1); return false; }
             if (!parse_float_arg(argv[++i], opt.aperture)) { std::cerr << "Invalid --aperture value.\n"; return false; }
@@ -349,6 +393,18 @@ int main(int argc, char** argv) {
     }
     if (opt.turntable_radius_set && opt.turntable_radius <= 0.0f) {
         std::cerr << "Invalid --turntable-radius value (must be > 0).\n";
+        return 1;
+    }
+
+    if (!opt.denoise_set) {
+        opt.denoise = (opt.spp <= 8);
+    }
+    if (opt.denoise_iterations < 0) {
+        std::cerr << "Invalid --denoise-iterations value (must be >= 0).\n";
+        return 1;
+    }
+    if (opt.denoise_sigma_depth < 0.0f || opt.denoise_sigma_normal < 0.0f || opt.denoise_sigma_albedo < 0.0f) {
+        std::cerr << "Invalid denoiser sigma value(s) (must be >= 0).\n";
         return 1;
     }
 
@@ -556,14 +612,40 @@ int main(int argc, char** argv) {
         PathTracer integrator(opt.max_depth);
 
         std::cout << "Rendering scene: " << opt.scene_name << "\n";
-        render_image(scene, camera, integrator, film, opt.spp);
 
-        if (opt.output.size() >= 4 && opt.output.substr(opt.output.size() - 4) == ".png") {
-            write_png(opt.output, film);
-            std::cout << "Wrote PNG image to " << opt.output << "\n";
+        const bool denoise_enabled = opt.denoise && opt.denoise_iterations > 0;
+        if (denoise_enabled) {
+            std::cout << "Denoiser: on (A-Trous, " << opt.denoise_iterations << " iterations)\n";
+            GBuffer gbuffer(opt.width, opt.height);
+            render_image_with_gbuffer(scene, camera, integrator, film, gbuffer, opt.spp);
+
+            DenoiseParams denoise_params;
+            denoise_params.iterations = opt.denoise_iterations;
+            denoise_params.sigma_depth = opt.denoise_sigma_depth;
+            denoise_params.sigma_normal = opt.denoise_sigma_normal;
+            denoise_params.sigma_albedo = opt.denoise_sigma_albedo;
+            const Film denoised = denoise_atrous(film, gbuffer, denoise_params);
+
+            if (opt.output.size() >= 4 && opt.output.substr(opt.output.size() - 4) == ".png") {
+                write_png(opt.output, denoised);
+                std::cout << "Wrote PNG image to " << opt.output << "\n";
+            } else {
+                write_ppm(opt.output, denoised);
+                std::cout << "Wrote PPM image to " << opt.output << "\n";
+            }
         } else {
-            write_ppm(opt.output, film);
-            std::cout << "Wrote PPM image to " << opt.output << "\n";
+            if (opt.denoise) {
+                std::cout << "Denoiser: off (iterations = 0)\n";
+            }
+            render_image(scene, camera, integrator, film, opt.spp);
+
+            if (opt.output.size() >= 4 && opt.output.substr(opt.output.size() - 4) == ".png") {
+                write_png(opt.output, film);
+                std::cout << "Wrote PNG image to " << opt.output << "\n";
+            } else {
+                write_ppm(opt.output, film);
+                std::cout << "Wrote PPM image to " << opt.output << "\n";
+            }
         }
     } else {
         PathTracer integrator(opt.max_depth);
@@ -608,7 +690,19 @@ int main(int argc, char** argv) {
             std::cout << "\rRendering frame " << (frame + 1) << "/" << opt.turntable_frames
                       << " (angle: " << static_cast<int>(angle * 180.0f / kPi) << " deg)" << std::flush;
 
-            render_image(scene, camera, integrator, frame_film, opt.spp);
+            const bool denoise_enabled = opt.denoise && opt.denoise_iterations > 0;
+            if (denoise_enabled) {
+                GBuffer gbuffer(opt.width, opt.height);
+                render_image_with_gbuffer(scene, camera, integrator, frame_film, gbuffer, opt.spp);
+                DenoiseParams denoise_params;
+                denoise_params.iterations = opt.denoise_iterations;
+                denoise_params.sigma_depth = opt.denoise_sigma_depth;
+                denoise_params.sigma_normal = opt.denoise_sigma_normal;
+                denoise_params.sigma_albedo = opt.denoise_sigma_albedo;
+                frame_film = denoise_atrous(frame_film, gbuffer, denoise_params);
+            } else {
+                render_image(scene, camera, integrator, frame_film, opt.spp);
+            }
 
             std::ostringstream filename;
             filename << base_name << "_" << std::setfill('0') << std::setw(4) << frame << extension;

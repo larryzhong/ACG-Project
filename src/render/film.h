@@ -33,6 +33,21 @@ public:
         return pixels_[index(x, y)];
     }
 
+    void set_pixel(int x, int y, const Color& c) {
+        if (x < 0 || x >= width_ || y < 0 || y >= height_) {
+            return;
+        }
+        pixels_[index(x, y)] = c;
+    }
+
+    const std::vector<Color>& pixels() const {
+        return pixels_;
+    }
+
+    std::vector<Color>& mutable_pixels() {
+        return pixels_;
+    }
+
 private:
     std::size_t index(int x, int y) const {
         return static_cast<std::size_t>(y) * static_cast<std::size_t>(width_) +
@@ -43,4 +58,3 @@ private:
     int height_;
     std::vector<Color> pixels_;
 };
-

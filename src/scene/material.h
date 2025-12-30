@@ -67,6 +67,10 @@ class Material {
 public:
     virtual ~Material() = default;
 
+    virtual Color albedo(const HitRecord& /*hit*/) const {
+        return Color(0.0f);
+    }
+
     virtual Color eval(const Vec3& /*wo*/,
                        const Vec3& /*wi*/,
                        const HitRecord& /*hit*/) const {
@@ -110,6 +114,10 @@ class Lambertian : public Material {
 public:
     explicit Lambertian(const TexturePtr& albedo) : albedo_(albedo) {}
 
+    Color albedo(const HitRecord& hit) const override {
+        return albedo_ ? albedo_->value(hit) : Color(1.0f);
+    }
+
     Color eval(const Vec3& /*wo*/,
                const Vec3& wi,
                const HitRecord& hit) const override {
@@ -117,9 +125,7 @@ public:
         if (dot(n, wi) <= 0.0f) {
             return Color(0.0f);
         }
-        const Color albedo =
-            albedo_ ? albedo_->value(hit) : Color(1.0f);
-        return albedo * (1.0f / kPi);
+        return albedo(hit) * (1.0f / kPi);
     }
 
     float pdf(const Vec3& /*wo*/,
@@ -164,6 +170,10 @@ public:
     Metal(const TexturePtr& albedo, float fuzz)
         : albedo_(albedo), fuzz_(fuzz < 1.0f ? fuzz : 1.0f) {}
 
+    Color albedo(const HitRecord& hit) const override {
+        return albedo_ ? albedo_->value(hit) : Color(1.0f);
+    }
+
     Color eval(const Vec3& wo,
                const Vec3& wi,
                const HitRecord& hit) const override {
@@ -189,8 +199,7 @@ public:
         const float D = ggx_D(alpha, n_dot_h);
         const float G = ggx_G(alpha, n_dot_v, n_dot_l);
 
-        const Color f0 =
-            albedo_ ? albedo_->value(hit) : Color(1.0f);
+        const Color f0 = albedo(hit);
         const Color F = schlick_fresnel(f0, v_dot_h);
 
         return (D * G) * F / (4.0f * n_dot_v * n_dot_l);
@@ -281,6 +290,13 @@ class DiffuseLight : public Material {
 public:
     explicit DiffuseLight(const TexturePtr& emit) : emit_(emit) {}
 
+    Color albedo(const HitRecord& hit) const override {
+        if (!emit_ || !hit.front_face) {
+            return Color(0.0f);
+        }
+        return emit_->value(hit);
+    }
+
     bool sample(const Vec3& /*wo*/,
                 const HitRecord& /*hit*/,
                 Vec3& /*wi*/,
@@ -306,6 +322,10 @@ class EmissiveMaterial : public Material {
 public:
     EmissiveMaterial(const MaterialPtr& base, const TexturePtr& emission, bool double_sided = false)
         : base_(base), emission_(emission), double_sided_(double_sided) {}
+
+    Color albedo(const HitRecord& hit) const override {
+        return base_ ? base_->albedo(hit) : Color(0.0f);
+    }
 
     Color eval(const Vec3& wo,
                const Vec3& wi,
@@ -606,6 +626,10 @@ public:
     NormalMappedLambertian(const TexturePtr& albedo, const NormalMapPtr& normal_map, float strength = 1.0f)
         : albedo_(albedo), normal_map_(normal_map), strength_(strength) {}
 
+    Color albedo(const HitRecord& hit) const override {
+        return albedo_ ? albedo_->value(hit) : Color(1.0f);
+    }
+
     Vec3 get_shading_normal(const HitRecord& hit) const override {
         if (normal_map_ && normal_map_->valid()) {
             Vec3 tangent_normal = normal_map_->get_normal(hit.u, hit.v);
@@ -625,9 +649,7 @@ public:
         if (dot(n, wi) <= 0.0f) {
             return Color(0.0f);
         }
-        const Color albedo =
-            albedo_ ? albedo_->value(hit) : Color(1.0f);
-        return albedo * (1.0f / kPi);
+        return albedo(hit) * (1.0f / kPi);
     }
 
     float pdf(const Vec3& /*wo*/,
@@ -689,6 +711,12 @@ public:
           normal_strength_(normal_strength),
           occlusion_tex_(occlusion_tex),
           occlusion_strength_(occlusion_strength) {}
+
+    Color albedo(const HitRecord& hit) const override {
+        const Color base_color = base_color_ ? base_color_->value(hit) : Color(1.0f);
+        const float metallic_value = metallic(hit);
+        return (1.0f - metallic_value) * base_color;
+    }
 
     Vec3 get_shading_normal(const HitRecord& hit) const override {
         if (normal_map_ && normal_map_->valid()) {
