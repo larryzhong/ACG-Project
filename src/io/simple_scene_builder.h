@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/color.h"
+#include "io/gltf_loader.h"
 #include "io/obj_loader.h"
 #include "scene/material.h"
 #include "scene/mesh.h"
@@ -14,6 +15,68 @@
 #include "scene/scene.h"
 #include "scene/sphere.h"
 #include "scene/texture.h"
+
+namespace simple_scene_builder_detail {
+
+inline bool compute_gltf_bounds(const std::vector<GltfMeshInstance>& meshes, AABB& out_bounds) {
+    bool has_bounds = false;
+    for (const auto& inst : meshes) {
+        if (!inst.data) continue;
+        const AABB inst_bounds = transform_aabb(inst.data->bounding_box(), inst.transform);
+        if (!has_bounds) {
+            out_bounds = inst_bounds;
+            has_bounds = true;
+        } else {
+            out_bounds = surrounding_box(out_bounds, inst_bounds);
+        }
+    }
+    return has_bounds;
+}
+
+inline bool add_scaled_gltf_to_scene(
+    Scene& scene,
+    const std::string& path,
+    const Vec3& target_pos,
+    float target_height,
+    std::string* out_err,
+    const GltfLoadOptions& options = {})
+{
+    std::vector<GltfMeshInstance> meshes;
+    std::string gltf_err;
+    if (!load_gltf_meshes(path, meshes, &gltf_err, options)) {
+        if (out_err) *out_err = gltf_err;
+        return false;
+    }
+
+    AABB bounds;
+    if (!compute_gltf_bounds(meshes, bounds)) {
+        if (out_err) *out_err = "glTF contained no mesh data.";
+        return false;
+    }
+
+    const float bounds_h = bounds.max.y - bounds.min.y;
+    const float scale = (bounds_h > 1e-6f) ? (target_height / bounds_h) : 1.0f;
+
+    // Pivot at bottom-center.
+    const Vec3 pivot(
+        (bounds.min.x + bounds.max.x) * 0.5f,
+        bounds.min.y,
+        (bounds.min.z + bounds.max.z) * 0.5f);
+
+    const Transform world_from_gltf =
+        Transform::translate(target_pos) *
+        Transform::uniform_scale(scale) *
+        Transform::translate(-pivot);
+
+    for (const auto& inst : meshes) {
+        if (!inst.data || !inst.material) continue;
+        scene.objects.push_back(std::make_shared<Mesh>(inst.data, world_from_gltf * inst.transform, inst.material));
+    }
+
+    return true;
+}
+
+} // namespace simple_scene_builder_detail
 
 inline Scene build_simple_scene_basic() {
     Scene scene;
@@ -788,6 +851,14 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     add_box(Vec3(0.85f, 0.0f, -7.90f), Vec3(3.65f, 0.30f, -4.50f), bed_frame_mat);
     // Mattress
     add_box(Vec3(0.95f, 0.30f, -7.80f), Vec3(3.55f, 0.65f, -4.60f), bedding_mat);
+    // Rug beside the bed
+    auto rug_mat = std::make_shared<Lambertian>(
+        std::make_shared<SolidColor>(Color(0.65f, 0.62f, 0.58f)));
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(-0.5f, 0.003f, -4.0f),
+        Vec3(3.5f, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, 2.5f),
+        rug_mat));
     // Pillow (OBJ)
     // Loads ../assets/models/Pillow.obj and auto-scales it to a reasonable size.
     {
@@ -1246,6 +1317,19 @@ inline Scene build_hotel_room_scene(const std::string& mural_texture_path = "../
     add_box(Vec3(table_x0 + 0.06f, tbl_shelf_y, table_z0 + 0.06f),
             Vec3(table_x1 - 0.06f, tbl_shelf_y + tbl_shelf_thick, table_z1 - 0.06f),
             table_wood_mat);
+
+    // Coffee cup on the coffee table
+    {
+        std::string cup_err;
+        const std::string cup_path = "../assets/cup.gltf";
+
+        // Place near the center of the tabletop, slightly above to avoid z-fighting.
+        const float tabletop_y = table_h;
+        const Vec3 cup_pos(table_cx, tabletop_y + 0.001f, table_cz);
+
+        // Typical cup height in this scene scale. (2x)
+        (void)simple_scene_builder_detail::add_scaled_gltf_to_scene(scene, cup_path, cup_pos, 0.14f, &cup_err);
+    }
     
     // Floor lamp near left-front corner (realistic size)
     auto lamp_shade_mat = std::make_shared<Lambertian>(
