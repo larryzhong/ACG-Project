@@ -33,6 +33,8 @@ struct Options {
     bool spp_set = false;
     bool max_depth_set = false;
 
+    bool mipmaps = true;
+
     float aperture = 0.0f;
     float focus_dist = 0.0f;
     float shutter_open = 0.0f;
@@ -85,7 +87,7 @@ void print_usage(const char* exe) {
     std::cerr
         << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
         << "Options:\n"
-        << "  --scene <name>           Built-in scene (simple|simple_pbr|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
+        << "  --scene <name>           Built-in scene (simple|simple_pbr|dof|motion|texture|random|solar|alpha|mipmap|mesh|gltf|hotel)\n"
         << "  --gltf <path>            glTF file (scene 'gltf') OR outside model (scene 'hotel')\n"
         << "  --plant-gltf <path>      Indoor plant glTF (scene 'hotel' only)\n"
         << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
@@ -93,6 +95,8 @@ void print_usage(const char* exe) {
         << "  --height <int>           Image height\n"
         << "  --spp <int>              Samples per pixel\n"
         << "  --max-depth <int>        Path tracer max depth\n"
+        << "  --mipmap                 Enable texture mipmap sampling (default)\n"
+        << "  --no-mipmap              Disable mipmap sampling (force LOD 0)\n"
         << "  --denoise                Enable G-buffer guided denoiser (default: auto for low SPP)\n"
         << "  --no-denoise             Disable denoiser\n"
         << "  --denoise-iterations <i> Denoiser iterations (default: 5)\n"
@@ -199,6 +203,10 @@ bool parse_args(int argc, char** argv, Options& opt) {
             if (i + 1 >= argc) { missing_value(1); return false; }
             if (!parse_int_arg(argv[++i], opt.max_depth)) { std::cerr << "Invalid --max-depth value.\n"; return false; }
             opt.max_depth_set = true;
+        } else if (arg == "--mipmap") {
+            opt.mipmaps = true;
+        } else if (arg == "--no-mipmap") {
+            opt.mipmaps = false;
         } else if (arg == "--denoise") {
             opt.denoise = true;
             opt.denoise_set = true;
@@ -408,6 +416,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    ImageTexture::set_mipmaps_enabled(opt.mipmaps);
+
     Film film(opt.width, opt.height);
     Scene scene;
 
@@ -464,6 +474,12 @@ int main(int argc, char** argv) {
         cam_settings.look_from = Vec3(0.0f, 3.0f, 6.0f);
         cam_settings.look_at = Vec3(0.0f, 1.0f, 0.0f);
         cam_settings.vertical_fov_deg = 40.0f;
+    } else if (opt.scene_name == "mipmap") {
+        scene = build_mipmap_demo_scene();
+        // Low, grazing view to amplify minification; pitch down a bit so near-field texture stays visible.
+        cam_settings.look_from = Vec3(0.0f, 0.55f, 6.0f);
+        cam_settings.look_at = Vec3(0.0f, 0.02f, -120.0f);
+        cam_settings.vertical_fov_deg = 38.0f;
     } else if (opt.scene_name == "mesh") {
         scene = build_mesh_scene();
         cam_settings.look_from = Vec3(0.0f, 1.6f, 3.5f);

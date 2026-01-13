@@ -238,6 +238,10 @@ public:
 
         const float u = hit.u;
         const float v = hit.v;
+        if (!mipmaps_enabled() || mip_levels_.size() <= 1) {
+            return sample_bilinear(mip_levels_.front(), u, v);
+        }
+
         const float lod = compute_lod(hit);
         return sample_trilinear(u, v, lod);
     }
@@ -249,6 +253,10 @@ public:
 
         const float u = hit.u;
         const float v = hit.v;
+        if (!mipmaps_enabled() || mip_levels_.size() <= 1) {
+            return sample_alpha_bilinear(mip_levels_.front(), u, v);
+        }
+
         const float lod = compute_lod(hit);
         return sample_alpha_trilinear(u, v, lod);
     }
@@ -256,6 +264,10 @@ public:
     bool valid() const { return !mip_levels_.empty(); }
     int width() const { return width_; }
     int height() const { return height_; }
+
+    static void set_mipmaps_enabled(bool enabled) { mipmaps_enabled_flag() = enabled; }
+    static bool mipmaps_enabled() { return mipmaps_enabled_flag(); }
+
     static float wrap_coord(float x, WrapMode mode) {
         switch (mode) {
             case WrapMode::ClampToEdge:
@@ -273,6 +285,10 @@ public:
     }
 
 private:
+    static bool& mipmaps_enabled_flag() {
+        static bool enabled = true;
+        return enabled;
+    }
 
     struct MipLevel {
         int width = 0;
@@ -369,6 +385,11 @@ private:
         }
 
         mip_levels_.push_back(std::move(base));
+
+        if (!mipmaps_enabled()) {
+            release_source_data();
+            return;
+        }
 
         while (true) {
             const MipLevel& src = mip_levels_.back();

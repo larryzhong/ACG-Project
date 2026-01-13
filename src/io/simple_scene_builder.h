@@ -556,6 +556,76 @@ inline Scene build_alpha_shadow_scene() {
     return scene;
 }
 
+// ==========================================
+// Scene: Mipmap Demo (Tilted High-Frequency Plane)
+// ==========================================
+inline Scene build_mipmap_demo_scene(const std::string& texture_path = "../assets/textures/Starry_Night.jpg") {
+    Scene scene;
+
+    auto plane_tex = std::make_shared<ImageTexture>(
+        texture_path,
+        ImageTexture::ColorSpace::sRGB,
+        /*channel=*/-1,
+        /*flip_v=*/true,
+        ImageTexture::WrapMode::Repeat,
+        ImageTexture::WrapMode::Repeat);
+
+    // Make the texture self-lit so the result isn't sensitive to light placement/exposure.
+    // This also isolates mipmap filtering differences (it's purely texture sampling).
+    auto plane_mat = std::make_shared<DiffuseLight>(plane_tex);
+
+    // A long "floor" plane that extends far away.
+    // We keep it almost horizontal and rely on a very low camera in main.cpp
+    // for a grazing view that produces strong minification.
+    const float w = 6.0f;
+    const float z_near = 2.0f;
+    const float z_far = -420.0f;
+    const float y = 0.0f;
+
+    // Two strips share the same geometry but use different UV frequencies:
+    // - Left: low frequency, recognizable "Starry Night"
+    // - Right: very high frequency, strong aliasing without mipmaps
+    const float x_mid = 0.0f;
+
+    auto add_strip = [&](float x0, float x1, float u_repeat, float v_repeat) {
+        const Vec3 p0(x0, y, z_near);
+        const Vec3 p1(x1, y, z_near);
+        const Vec3 p2(x0, y, z_far);
+        const Vec3 p3(x1, y, z_far);
+
+        const Vec3 e1 = p1 - p0;
+        const Vec3 e2 = p2 - p0;
+        const Vec3 n = normalize(cross(e1, e2));
+
+        std::vector<Vec3> positions = {p0, p1, p2, p3};
+        std::vector<Vec3> normals = {n, n, n, n};
+        std::vector<Vec2> uvs = {
+            Vec2(0.0f,      0.0f),
+            Vec2(u_repeat,  0.0f),
+            Vec2(0.0f,      v_repeat),
+            Vec2(u_repeat,  v_repeat),
+        };
+        std::vector<std::uint32_t> indices = {0, 1, 2, 2, 1, 3};
+
+        MeshDataPtr data =
+            std::make_shared<MeshData>(std::move(positions), std::move(normals), std::move(uvs), std::move(indices));
+        scene.objects.push_back(std::make_shared<Mesh>(data, Transform::identity(), plane_mat));
+    };
+
+    add_strip(-w, x_mid, /*u_repeat=*/1.0f, /*v_repeat=*/18.0f);
+    add_strip(x_mid, w,  /*u_repeat=*/10.0f, /*v_repeat=*/1200.0f);
+
+    // A subtle horizon wall for visual reference (not lit, since the plane is emissive).
+    auto back_wall = std::make_shared<Lambertian>(std::make_shared<SolidColor>(Color(0.08f, 0.08f, 0.09f)));
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(-24.0f, 0.0f, z_far - 1.0f),
+        Vec3(48.0f, 0.0f, 0.0f),
+        Vec3(0.0f, 10.0f, 0.0f),
+        back_wall));
+
+    return scene;
+}
+
 inline Scene build_mesh_scene() {
     Scene scene;
 
