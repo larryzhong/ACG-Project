@@ -557,7 +557,7 @@ inline Scene build_alpha_shadow_scene() {
 }
 
 // ==========================================
-// Scene: Mipmap Demo (Tilted High-Frequency Plane)
+// Scene: Mipmap Demo (Grazing High-Frequency Plane)
 // ==========================================
 inline Scene build_mipmap_demo_scene(const std::string& texture_path = "../assets/textures/Starry_Night.jpg") {
     Scene scene;
@@ -581,11 +581,6 @@ inline Scene build_mipmap_demo_scene(const std::string& texture_path = "../asset
     const float z_near = 2.0f;
     const float z_far = -420.0f;
     const float y = 0.0f;
-
-    // Two strips share the same geometry but use different UV frequencies:
-    // - Left: low frequency, recognizable "Starry Night"
-    // - Right: very high frequency, strong aliasing without mipmaps
-    const float x_mid = 0.0f;
 
     auto add_strip = [&](float x0, float x1, float u_repeat, float v_repeat) {
         const Vec3 p0(x0, y, z_near);
@@ -612,8 +607,8 @@ inline Scene build_mipmap_demo_scene(const std::string& texture_path = "../asset
         scene.objects.push_back(std::make_shared<Mesh>(data, Transform::identity(), plane_mat));
     };
 
-    add_strip(-w, x_mid, /*u_repeat=*/1.0f, /*v_repeat=*/18.0f);
-    add_strip(x_mid, w,  /*u_repeat=*/10.0f, /*v_repeat=*/1200.0f);
+    // Single high-frequency strip (best for demonstrating mipmap vs no-mipmap).
+    add_strip(-w, w, /*u_repeat=*/10.0f, /*v_repeat=*/1200.0f);
 
     // A subtle horizon wall for visual reference (not lit, since the plane is emissive).
     auto back_wall = std::make_shared<Lambertian>(std::make_shared<SolidColor>(Color(0.08f, 0.08f, 0.09f)));
