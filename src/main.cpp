@@ -87,11 +87,7 @@ void print_usage(const char* exe) {
     std::cerr
         << "Usage: " << (exe ? exe : "pathtracer") << " [options]\n"
         << "Options:\n"
-<<<<<<< Updated upstream
-        << "  --scene <name>           Built-in scene (simple|fog|sss|simple_pbr|dof|motion|texture|random|solar|alpha|mipmap|mesh|gltf|hotel)\n"
-=======
-            << "  --scene <name>           Built-in scene (simple|fog|vol-gradient|sss|sss-red|sss-green|sss-blue|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
->>>>>>> Stashed changes
+        << "  --scene <name>           Built-in scene (simple|fog|vol-gradient|sss|sss-red|sss-green|sss-blue|dof|motion|texture|random|solar|alpha|mesh|gltf|hotel)\n"
         << "  --gltf <path>            glTF file (scene 'gltf') OR outside model (scene 'hotel')\n"
         << "  --plant-gltf <path>      Indoor plant glTF (scene 'hotel' only)\n"
         << "  --output <path>          Output image path (.png writes PNG, otherwise PPM)\n"
