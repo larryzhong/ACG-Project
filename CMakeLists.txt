@@ -13,3 +13,8 @@ add_executable(pathtracer
     src/scene/environment.cpp
 )
 target_include_directories(pathtracer PRIVATE src)
+
+add_executable(acc_test
+    src/scene/acc_test.cpp
+)
+target_include_directories(acc_test PRIVATE src)
