@@ -84,3 +84,31 @@ private:
     float y0_ = 0.0f;
     float k_ = 0.0f;
 };
+
+// Linear gradient along Y:
+// density(p) = lerp(d0, d1, clamp((p.y - y0) / (y1 - y0), 0, 1))
+class LinearGradientDensityField : public DensityField {
+public:
+    LinearGradientDensityField(float y0, float y1, float d0, float d1)
+        : y0_(y0), y1_(y1), d0_(std::max(0.0f, d0)), d1_(std::max(0.0f, d1)) {}
+
+    float density(const Vec3& p) const override {
+        if (std::fabs(y1_ - y0_) < 1e-8f) {
+            return std::max(d0_, d1_);
+        }
+        float t = (p.y - y0_) / (y1_ - y0_);
+        t = std::max(0.0f, std::min(t, 1.0f));
+        const float d = d0_ + t * (d1_ - d0_);
+        return std::max(0.0f, d);
+    }
+
+    float max_density() const override {
+        return std::max(d0_, d1_);
+    }
+
+private:
+    float y0_ = 0.0f;
+    float y1_ = 1.0f;
+    float d0_ = 0.0f;
+    float d1_ = 0.0f;
+};

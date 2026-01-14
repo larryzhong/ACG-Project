@@ -1,1 +1,7 @@
 build/
+AGENTS.md
+.gitignore
+dump.py
+plan.md
+README.md
+sources_for_llm.txt

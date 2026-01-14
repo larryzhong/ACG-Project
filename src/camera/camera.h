@@ -39,8 +39,17 @@ public:
 
     Ray generate_ray(float s, float t, RNG& rng) const;
 
+    const Vec3& origin() const {
+        return origin_;
+    }
+
+    const Vec3& forward() const {
+        return forward_;
+    }
+
 private:
     Vec3 origin_;
+    Vec3 forward_;
     Vec3 lower_left_corner_;
     Vec3 horizontal_;
     Vec3 vertical_;
@@ -63,6 +72,7 @@ inline Camera::Camera(const CameraSettings& settings) {
     const Vec3 v = cross(w, u);
 
     origin_ = settings.look_from;
+    forward_ = -w;
     const float focus_dist = settings.focus_dist;
 
     horizontal_ = focus_dist * viewport_width * u;

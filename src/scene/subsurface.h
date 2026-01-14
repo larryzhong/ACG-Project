@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -28,10 +29,23 @@ public:
                                  int max_steps = 64,
                                  float max_distance = 1e30f)
         : albedo_(albedo),
-          sigma_s_(std::max(0.0f, sigma_s)),
-          sigma_a_(std::max(0.0f, sigma_a)),
+                    sigma_s_rgb_(Color(std::max(0.0f, sigma_s))),
+                    sigma_a_rgb_(Color(std::max(0.0f, sigma_a))),
+                    sigma_t_scalar_(compute_sigma_t_scalar(sigma_s_rgb_, sigma_a_rgb_)),
           max_steps_(std::max(1, max_steps)),
           max_distance_(max_distance) {}
+
+        SubsurfaceRandomWalkMaterial(const TexturePtr& albedo,
+                                                                 const Color& sigma_s_rgb,
+                                                                 const Color& sigma_a_rgb,
+                                                                 int max_steps = 64,
+                                                                 float max_distance = 1e30f)
+                : albedo_(albedo),
+                    sigma_s_rgb_(clamp_nonneg(sigma_s_rgb)),
+                    sigma_a_rgb_(clamp_nonneg(sigma_a_rgb)),
+                    sigma_t_scalar_(compute_sigma_t_scalar(sigma_s_rgb_, sigma_a_rgb_)),
+                    max_steps_(std::max(1, max_steps)),
+                    max_distance_(max_distance) {}
 
     // Surface BSDF: keep it simple (diffuse). The integrator will *not* use these for the entry event,
     // but they can be used if you ever hit the material from the outside and choose to shade as a surface.
@@ -71,9 +85,20 @@ public:
         return 1.0f;
     }
 
-    float sigma_s() const { return sigma_s_; }
-    float sigma_a() const { return sigma_a_; }
-    float sigma_t() const { return sigma_s_ + sigma_a_; }
+    // Scalar coefficients used for distance sampling (channel-independent transport).
+    float sigma_s() const { return luminance(sigma_s_rgb_); }
+    float sigma_a() const { return luminance(sigma_a_rgb_); }
+    float sigma_t() const { return sigma_t_scalar_; }
+
+    // RGB coefficients used for per-channel throughput.
+    Color sigma_s_rgb() const { return sigma_s_rgb_; }
+    Color sigma_a_rgb() const { return sigma_a_rgb_; }
+    Color sigma_t_rgb() const { return sigma_s_rgb_ + sigma_a_rgb_; }
+
+    Color sss_albedo_rgb() const {
+        const Color st = sigma_t_rgb();
+        return safe_div(sigma_s_rgb_, st);
+    }
 
     Color albedo(const HitRecord& hit) const {
         return albedo_ ? albedo_->value(hit) : Color(1.0f);
@@ -87,7 +112,7 @@ public:
         out = SubsurfaceSample{};
 
         const float st = sigma_t();
-        if (!(st > 0.0f) || sigma_s_ <= 0.0f) {
+        if (!(st > 0.0f) || max_component(sigma_s_rgb_) <= 0.0f) {
             return false;
         }
 
@@ -100,6 +125,10 @@ public:
 
         Color throughput(1.0f);
         float traveled = 0.0f;
+
+        const Color sigma_t_rgb_local = sigma_t_rgb();
+        const Color albedo_rgb_local = sss_albedo_rgb();
+        const float scatter_q = clamp_float(max_component(albedo_rgb_local), 0.0f, 0.999f);
 
         for (int step = 0; step < max_steps_; ++step) {
             // Sample free-flight distance.
@@ -118,9 +147,8 @@ public:
 
             // Exit if boundary is closer than the sampled collision distance.
             if (s >= t_boundary) {
-                // Apply transmittance to the boundary.
-                const float seg = std::exp(-st * t_boundary);
-                throughput *= seg;
+                // Apply RGB transmittance to the boundary.
+                throughput = throughput * exp_rgb(-sigma_t_rgb_local * t_boundary);
                 traveled += t_boundary;
 
                 // If we accumulated too much distance, stop.
@@ -133,9 +161,10 @@ public:
                 out.exit_hit = hit;
                 out.dir_in_medium = dir;
 
-                // Apply scattering albedo to approximate scattering survival.
-                const float albedo = sigma_s_ / st;
-                throughput = throughput * Color(albedo, albedo, albedo);
+                // Apply a final albedo tint (channel-independent transport, channel-dependent color).
+                if (scatter_q > 0.0f) {
+                    throughput = throughput * (albedo_rgb_local / scatter_q);
+                }
 
                 // Tint by surface albedo at entry (simple artistic control).
                 if (albedo_) {
@@ -147,18 +176,18 @@ public:
             }
 
             // We scatter inside before reaching boundary.
-            const float seg = std::exp(-st * s);
-            throughput *= seg;
+            throughput = throughput * exp_rgb(-sigma_t_rgb_local * s);
             traveled += s;
             if (traveled > max_distance_) {
                 return false;
             }
 
-            // Convert absorption vs scattering: roulette with single-scattering albedo.
-            const float scatter_prob = sigma_s_ / st;
-            if (rng.uniform() > scatter_prob) {
+            // Absorption vs scattering: roulette based on max-channel albedo.
+            if (scatter_q <= 0.0f || rng.uniform() > scatter_q) {
                 return false;
             }
+
+            throughput = throughput * (albedo_rgb_local / scatter_q);
 
             // Scatter: move to new point and pick a new direction.
             p = ray.at(s);
@@ -178,9 +207,37 @@ public:
     }
 
 private:
+    static Color clamp_nonneg(const Color& c) {
+        return Color(std::max(0.0f, c.x), std::max(0.0f, c.y), std::max(0.0f, c.z));
+    }
+
+    static float luminance(const Color& c) {
+        return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
+    }
+
+    static float max_component(const Color& c) {
+        return std::max({c.x, c.y, c.z});
+    }
+
+    static Color safe_div(const Color& a, const Color& b) {
+        const float ex = (b.x > 1e-8f) ? (a.x / b.x) : 0.0f;
+        const float ey = (b.y > 1e-8f) ? (a.y / b.y) : 0.0f;
+        const float ez = (b.z > 1e-8f) ? (a.z / b.z) : 0.0f;
+        return Color(ex, ey, ez);
+    }
+
+    static Color exp_rgb(const Color& v) {
+        return Color(std::exp(v.x), std::exp(v.y), std::exp(v.z));
+    }
+
+    static float compute_sigma_t_scalar(const Color& sigma_s_rgb, const Color& sigma_a_rgb) {
+        return std::max(0.0f, luminance(sigma_s_rgb + sigma_a_rgb));
+    }
+
     TexturePtr albedo_;
-    float sigma_s_ = 0.0f;
-    float sigma_a_ = 0.0f;
+    Color sigma_s_rgb_ = Color(0.0f);
+    Color sigma_a_rgb_ = Color(0.0f);
+    float sigma_t_scalar_ = 0.0f;
     int max_steps_ = 64;
     float max_distance_ = 1e30f;
 };

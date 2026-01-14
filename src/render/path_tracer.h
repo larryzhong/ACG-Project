@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 #include "camera/camera.h"
 #include "core/color.h"
@@ -9,6 +10,7 @@
 #include "core/rng.h"
 #include "core/sampling.h"
 #include "render/film.h"
+#include "render/gbuffer.h"
 #include "render/integrator.h"
 #include "scene/material.h"
 #include "scene/medium.h"
@@ -91,7 +93,7 @@ public:
             Ray shadow_ray(p + shadow_epsilon * wi, wi, in_ray.time);
             shadow_ray.medium = in_ray.medium;
             HitRecord shadow_rec;
-            if (trace_first_hit(scene, shadow_ray, shadow_epsilon, 1e30f, rng, shadow_rec)) {
+            if (trace_first_hit(scene, shadow_ray, shadow_epsilon, 1e30f, rng, shadow_rec, nullptr, true)) {
                 return result;
             }
 
@@ -217,7 +219,7 @@ public:
         Ray shadow_ray(p + shadow_epsilon * wi, wi, in_ray.time);
         shadow_ray.medium = in_ray.medium;
         HitRecord shadow_rec;
-        if (trace_first_hit(scene, shadow_ray, shadow_epsilon, dist - 2.0f * shadow_epsilon, rng, shadow_rec)) {
+        if (trace_first_hit(scene, shadow_ray, shadow_epsilon, dist - 2.0f * shadow_epsilon, rng, shadow_rec, nullptr, true)) {
             return result;
         }
 
@@ -298,14 +300,46 @@ private:
             return Color(1.0f);
         }
 
-        // If a (sufficiently opaque) surface blocks the segment, return 0.
-        // For cutout alpha this is stochastic (matches existing behavior).
-        HitRecord hit;
-        if (trace_first_hit(scene, ray, t_min, t_max, rng, hit, ignore_object)) {
+        // Accumulate transmittance across potentially multiple media by walking through
+        // shadow-transparent medium boundaries and updating ray.medium.
+        Color Tr_total(1.0f);
+        float remaining = t_max;
+        const float eps = 0.001f;
+
+        for (int iter = 0; iter < 256; ++iter) {
+            HitRecord hit;
+            if (!trace_first_hit(scene, ray, t_min, remaining, rng, hit, ignore_object, /*skip_shadow_transparent*/ false)) {
+                Tr_total = Tr_total * medium_tr(scene, ray, remaining);
+                return Tr_total;
+            }
+
+            // Multiply Tr up to the boundary.
+            Tr_total = Tr_total * medium_tr(scene, ray, hit.t);
+            if (is_black(Tr_total)) {
+                return Color(0.0f);
+            }
+
+            // If it's a shadow-transparent boundary with a medium interface, step through and update medium.
+            if (hit.material && hit.material->shadow_transparent(hit) &&
+                (hit.medium_inside || hit.medium_outside)) {
+                const Medium* next = hit.front_face ? hit.medium_inside : hit.medium_outside;
+                Ray next_ray(hit.point + eps * ray.direction, ray.direction, ray.time);
+                next_ray.cone = ray.cone;
+                next_ray.medium = next;
+                ray = next_ray;
+
+                remaining -= (hit.t + eps);
+                if (remaining <= 0.0f) {
+                    return Tr_total;
+                }
+                continue;
+            }
+
+            // Otherwise it's a real occluder.
             return Color(0.0f);
         }
 
-        return medium_tr(scene, ray, t_max);
+        return Tr_total;
     }
 
     Color estimate_direct_lighting_medium(const Vec3& p,
@@ -513,13 +547,27 @@ private:
                                 float t_max,
                                 RNG& rng,
                                 HitRecord& out_rec,
-                                const Hittable* ignore_object = nullptr) {
+                                const Hittable* ignore_object = nullptr,
+                                bool skip_shadow_transparent = true) {
         float current_t_max = t_max;
         const float eps = 0.001f;
         for (int iter = 0; iter < 256; ++iter) {
             HitRecord rec;
             if (!scene.hit(ray, t_min, current_t_max, rec)) {
                 return false;
+            }
+
+            // Optionally treat shadow-transparent materials (e.g., volume container boundaries)
+            // as non-blocking. For segment-wise medium Tr we need to *see* these hits.
+            if (skip_shadow_transparent && rec.material && rec.material->shadow_transparent(rec)) {
+                Ray next_ray(rec.point + eps * ray.direction, ray.direction, ray.time);
+                next_ray.medium = ray.medium;
+                ray = next_ray;
+                current_t_max -= (rec.t + eps);
+                if (current_t_max <= 0.0f) {
+                    return false;
+                }
+                continue;
             }
 
             // Treat the ignored object as fully transparent (used for subsurface shadow rays).
@@ -637,7 +685,7 @@ private:
         ray.medium = in_ray.medium;
 
         HitRecord hit;
-        if (!trace_first_hit(scene, ray, eps, 1e30f, rng, hit)) {
+        if (!trace_first_hit(scene, ray, eps, 1e30f, rng, hit, nullptr, true)) {
             if (!has_env) {
                 return Color(0.0f);
             }
@@ -724,7 +772,7 @@ private:
                     const float max_w = std::max({ms.weight.x, ms.weight.y, ms.weight.z});
                     rr_prob = std::max(0.05f, std::min(max_w, 0.95f));
                     if (rng.uniform() >= rr_prob) {
-                        return direct;
+                        return ms.weight * direct;
                     }
                 }
 
@@ -733,7 +781,7 @@ private:
                 const Color phase_weight = f_phase * (1.0f / pdf_phase);
                 const Color indirect = ms.weight * phase_weight *
                     Li_internal(scattered, scene, rng, depth + 1, true);
-                return direct + indirect / rr_prob;
+                return ms.weight * direct + indirect / rr_prob;
             }
         }
 
@@ -788,7 +836,14 @@ private:
                     // - Shadow rays from inside ignore hits against the same boundary object.
 
                     const float st = sss->sigma_t();
-                    if (!(st > 0.0f) || sss->sigma_s() <= 0.0f) {
+                    const Color sigma_t_rgb = sss->sigma_t_rgb();
+                    const Color albedo_rgb = sss->sss_albedo_rgb();
+                    const float scatter_q = clamp_float(
+                        std::max({albedo_rgb.x, albedo_rgb.y, albedo_rgb.z}),
+                        0.0f,
+                        0.999f);
+
+                    if (!(st > 0.0f) || scatter_q <= 0.0f) {
                         return Color(0.0f);
                     }
 
@@ -823,8 +878,10 @@ private:
 
                         // If we reach the boundary before the next collision, exit the medium.
                         if (s >= t_boundary) {
-                            const float seg = std::exp(-st * t_boundary);
-                            throughput *= seg;
+                            throughput = throughput * Color(
+                                std::exp(-sigma_t_rgb.x * t_boundary),
+                                std::exp(-sigma_t_rgb.y * t_boundary),
+                                std::exp(-sigma_t_rgb.z * t_boundary));
                             traveled += t_boundary;
 
                             const Vec3 exit_p = boundary_hit.point + eps * dir;
@@ -838,15 +895,18 @@ private:
                         }
 
                         // We collide inside the medium.
-                        const float seg = std::exp(-st * s);
-                        throughput *= seg;
+                        throughput = throughput * Color(
+                            std::exp(-sigma_t_rgb.x * s),
+                            std::exp(-sigma_t_rgb.y * s),
+                            std::exp(-sigma_t_rgb.z * s));
                         traveled += s;
 
-                        // Absorption vs scattering: terminate if absorbed.
-                        const float scatter_prob = sss->sigma_s() / st;
-                        if (rng.uniform() > scatter_prob) {
+                        // Absorption vs scattering: roulette based on max-channel albedo.
+                        if (rng.uniform() > scatter_q) {
                             break;
                         }
+
+                        throughput = throughput * (albedo_rgb / scatter_q);
 
                         // Move to the scattering point.
                         p = boundary_ray.at(s);
@@ -938,6 +998,18 @@ private:
         const float roughness = material->cone_roughness(rec);
         Ray scattered(rec.point, wi, r.time, scatter_cone(r.cone, travel, roughness, is_delta));
         scattered.medium = r.medium;
+
+        // Per-object medium interface: if this hit provides inside/outside media and the sample
+        // crosses the surface (transmission), switch the active medium.
+        if (rec.medium_inside || rec.medium_outside) {
+            const Vec3 n = material->get_shading_normal(rec);
+            const float wo_n = dot(n, wo);
+            const float wi_n = dot(n, wi);
+            const bool crosses = (wo_n * wi_n) < 0.0f;
+            if (crosses) {
+                scattered.medium = rec.front_face ? rec.medium_inside : rec.medium_outside;
+            }
+        }
         const Color indirect = weight * Li_internal(scattered, scene, rng, depth + 1, next_count_emitted);
         return segment_Tr * (emitted + direct + indirect / rr_prob);
     }
@@ -999,5 +1071,99 @@ inline void render_image(const Scene& scene,
         t.join();
     }
     
+    std::cerr << "\rProgress: 100%\n";
+}
+
+inline void render_image_with_gbuffer(const Scene& scene,
+                                      const Camera& camera,
+                                      const Integrator& integrator,
+                                      Film& film,
+                                      GBuffer& gbuffer,
+                                      int samples_per_pixel) {
+    const int width = film.width();
+    const int height = film.height();
+
+    std::atomic<int> next_row{0};
+    std::atomic<int> completed_rows{0};
+
+    auto worker = [&]() {
+        while (true) {
+            int y = next_row.fetch_add(1);
+            if (y >= height) break;
+
+            RNG rng(42u + static_cast<std::uint64_t>(y) * 1000000u);
+
+            for (int x = 0; x < width; ++x) {
+                Color pixel_color(0.0f);
+                Vec3 normal_sum(0.0f);
+                Color albedo_sum(0.0f);
+                float depth_sum = 0.0f;
+                int hit_count = 0;
+
+                for (int s = 0; s < samples_per_pixel; ++s) {
+                    const float u = (static_cast<float>(x) + rng.uniform()) /
+                                    static_cast<float>(width - 1);
+                    const float v = 1.0f - ((static_cast<float>(y) + rng.uniform()) /
+                                            static_cast<float>(height - 1));
+
+                    Ray r = camera.generate_ray(u, v, rng);
+                    pixel_color += integrator.Li(r, scene, rng, 0);
+
+                    Ray gbuffer_ray = r;
+                    for (int alpha_steps = 0; alpha_steps < 8; ++alpha_steps) {
+                        HitRecord rec;
+                        if (!scene.hit(gbuffer_ray, 0.001f, 1e30f, rec)) {
+                            break;
+                        }
+
+                        const Material* material = rec.material;
+                        const float op = material ? material->opacity(rec) : 1.0f;
+                        if (op < 0.5f) {
+                            gbuffer_ray.origin = rec.point + 0.001f * gbuffer_ray.direction;
+                            continue;
+                        }
+
+                        normal_sum += normalize(rec.normal);
+                        albedo_sum += material ? material->albedo(rec) : Color(0.0f);
+                        depth_sum += dot(rec.point - camera.origin(), camera.forward());
+                        ++hit_count;
+                        break;
+                    }
+                }
+
+                const float inv_spp = 1.0f / static_cast<float>(samples_per_pixel);
+                film.set_pixel(x, y, pixel_color * inv_spp);
+
+                if (hit_count > 0) {
+                    const float inv_hits = 1.0f / static_cast<float>(hit_count);
+                    gbuffer.set(x,
+                                y,
+                                normalize(normal_sum * inv_hits),
+                                albedo_sum * inv_hits,
+                                depth_sum * inv_hits,
+                                true);
+                } else {
+                    gbuffer.set(x, y, Vec3(0.0f), Color(0.0f), 1e30f, false);
+                }
+            }
+
+            int done = completed_rows.fetch_add(1) + 1;
+            if (done % 10 == 0) {
+                std::cerr << "\rProgress: " << (100 * done / height) << "%" << std::flush;
+            }
+        }
+    };
+
+    unsigned int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4;
+
+    std::vector<std::thread> threads;
+    for (unsigned int i = 0; i < num_threads; ++i) {
+        threads.emplace_back(worker);
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+
     std::cerr << "\rProgress: 100%\n";
 }

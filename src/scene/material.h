@@ -67,6 +67,10 @@ class Material {
 public:
     virtual ~Material() = default;
 
+    virtual Color albedo(const HitRecord& /*hit*/) const {
+        return Color(0.0f);
+    }
+
     virtual Color eval(const Vec3& /*wo*/,
                        const Vec3& /*wi*/,
                        const HitRecord& /*hit*/) const {
@@ -95,6 +99,13 @@ public:
         return 1.0f;
     }
 
+    // If true, this surface is treated as non-occluding for shadow/visibility rays.
+    // Useful for volume container boundaries where we want Tr() through the medium,
+    // not hard occlusion by the boundary surface itself.
+    virtual bool shadow_transparent(const HitRecord& /*hit*/) const {
+        return false;
+    }
+
     virtual Vec3 get_shading_normal(const HitRecord& hit) const {
         return hit.normal;
     }
@@ -106,9 +117,115 @@ public:
 
 using MaterialPtr = std::shared_ptr<Material>;
 
+// Diffuse boundary with a diffuse transmission lobe (non-physical but practical):
+// - Gives a "solid" surface appearance via diffuse reflection.
+// - Allows rays to enter/exit a bounded medium without refraction/Fresnel.
+// - Diffuse transmission blurs bright emitters behind the object (unlike straight-through).
+// - Marked shadow-transparent so NEE rays can see lights through the container.
+class DiffuseTransmissionBoundary : public Material {
+public:
+    DiffuseTransmissionBoundary(const TexturePtr& diffuse_albedo,
+                                const TexturePtr& transmission_tint,
+                                float transmission_prob)
+        : diffuse_albedo_(diffuse_albedo),
+          transmission_tint_(transmission_tint),
+          transmission_prob_(clamp_float(transmission_prob, 0.0f, 1.0f)) {}
+
+    Color eval(const Vec3& /*wo*/, const Vec3& wi, const HitRecord& hit) const override {
+        const Vec3 n = get_shading_normal(hit);
+        const float cos_i = dot(n, wi);
+        if (cos_i == 0.0f) {
+            return Color(0.0f);
+        }
+
+        // Reflection side.
+        if (cos_i > 0.0f) {
+            const Color a = diffuse_albedo_ ? diffuse_albedo_->value(hit) : Color(1.0f);
+            return a * (1.0f / kPi);
+        }
+
+        // Transmission side (opposite hemisphere).
+        const Color t = transmission_tint_ ? transmission_tint_->value(hit) : Color(1.0f);
+        return t * (1.0f / kPi);
+    }
+
+    float pdf(const Vec3& /*wo*/, const Vec3& wi, const HitRecord& hit) const override {
+        // Mixture pdf for diffuse reflection + diffuse transmission.
+        const Vec3 n = get_shading_normal(hit);
+        const float w_trans = transmission_prob_;
+        const float w_diffuse = 1.0f - w_trans;
+
+        const float cosine = dot(n, wi);
+        if (cosine > 0.0f) {
+            return w_diffuse * cosine * (1.0f / kPi);
+        }
+
+        const float cosine_t = -cosine;
+        if (cosine_t <= 0.0f) {
+            return 0.0f;
+        }
+        return w_trans * cosine_t * (1.0f / kPi);
+    }
+
+    bool sample(const Vec3& wo,
+                const HitRecord& hit,
+                Vec3& wi,
+                float& out_pdf,
+                Color& out_f,
+                bool& out_is_delta,
+                RNG& rng) const override {
+        const float u = rng.uniform();
+        const float w_trans = transmission_prob_;
+        const float w_diffuse = 1.0f - w_trans;
+
+        // Diffuse transmission (sample cosine-weighted on the opposite hemisphere).
+        if (w_trans > 0.0f && u < w_trans) {
+            const Vec3 n = get_shading_normal(hit);
+            ONB uvw;
+            uvw.build_from_w(-n);
+            wi = uvw.local(random_cosine_direction(rng));
+
+            const float pdf_trans = std::max(0.0f, dot(-n, wi)) * (1.0f / kPi);
+            out_pdf = w_trans * pdf_trans;
+            out_is_delta = false;
+            out_f = eval(Vec3(0.0f), wi, hit);
+            return out_pdf > 0.0f;
+        }
+
+        // Diffuse reflection.
+        if (w_diffuse <= 0.0f) {
+            return false;
+        }
+
+        const Vec3 n = get_shading_normal(hit);
+        ONB uvw;
+        uvw.build_from_w(n);
+        wi = uvw.local(random_cosine_direction(rng));
+
+        const float pdf_diffuse = std::max(0.0f, dot(n, wi)) * (1.0f / kPi);
+        out_pdf = w_diffuse * pdf_diffuse;
+        out_is_delta = false;
+        out_f = eval(Vec3(0.0f), wi, hit);
+        return out_pdf > 0.0f;
+    }
+
+    bool shadow_transparent(const HitRecord& /*hit*/) const override {
+        return true;
+    }
+
+private:
+    TexturePtr diffuse_albedo_;
+    TexturePtr transmission_tint_;
+    float transmission_prob_ = 0.0f;
+};
+
 class Lambertian : public Material {
 public:
     explicit Lambertian(const TexturePtr& albedo) : albedo_(albedo) {}
+
+    Color albedo(const HitRecord& hit) const override {
+        return albedo_ ? albedo_->value(hit) : Color(1.0f);
+    }
 
     Color eval(const Vec3& /*wo*/,
                const Vec3& wi,
@@ -117,9 +234,7 @@ public:
         if (dot(n, wi) <= 0.0f) {
             return Color(0.0f);
         }
-        const Color albedo =
-            albedo_ ? albedo_->value(hit) : Color(1.0f);
-        return albedo * (1.0f / kPi);
+        return albedo(hit) * (1.0f / kPi);
     }
 
     float pdf(const Vec3& /*wo*/,
@@ -164,6 +279,10 @@ public:
     Metal(const TexturePtr& albedo, float fuzz)
         : albedo_(albedo), fuzz_(fuzz < 1.0f ? fuzz : 1.0f) {}
 
+    Color albedo(const HitRecord& hit) const override {
+        return albedo_ ? albedo_->value(hit) : Color(1.0f);
+    }
+
     Color eval(const Vec3& wo,
                const Vec3& wi,
                const HitRecord& hit) const override {
@@ -189,8 +308,7 @@ public:
         const float D = ggx_D(alpha, n_dot_h);
         const float G = ggx_G(alpha, n_dot_v, n_dot_l);
 
-        const Color f0 =
-            albedo_ ? albedo_->value(hit) : Color(1.0f);
+        const Color f0 = albedo(hit);
         const Color F = schlick_fresnel(f0, v_dot_h);
 
         return (D * G) * F / (4.0f * n_dot_v * n_dot_l);
@@ -281,6 +399,13 @@ class DiffuseLight : public Material {
 public:
     explicit DiffuseLight(const TexturePtr& emit) : emit_(emit) {}
 
+    Color albedo(const HitRecord& hit) const override {
+        if (!emit_ || !hit.front_face) {
+            return Color(0.0f);
+        }
+        return emit_->value(hit);
+    }
+
     bool sample(const Vec3& /*wo*/,
                 const HitRecord& /*hit*/,
                 Vec3& /*wi*/,
@@ -306,6 +431,10 @@ class EmissiveMaterial : public Material {
 public:
     EmissiveMaterial(const MaterialPtr& base, const TexturePtr& emission, bool double_sided = false)
         : base_(base), emission_(emission), double_sided_(double_sided) {}
+
+    Color albedo(const HitRecord& hit) const override {
+        return base_ ? base_->albedo(hit) : Color(0.0f);
+    }
 
     Color eval(const Vec3& wo,
                const Vec3& wi,
@@ -837,6 +966,10 @@ public:
     NormalMappedLambertian(const TexturePtr& albedo, const NormalMapPtr& normal_map, float strength = 1.0f)
         : albedo_(albedo), normal_map_(normal_map), strength_(strength) {}
 
+    Color albedo(const HitRecord& hit) const override {
+        return albedo_ ? albedo_->value(hit) : Color(1.0f);
+    }
+
     Vec3 get_shading_normal(const HitRecord& hit) const override {
         if (normal_map_ && normal_map_->valid()) {
             Vec3 tangent_normal = normal_map_->get_normal(hit.u, hit.v);
@@ -856,9 +989,7 @@ public:
         if (dot(n, wi) <= 0.0f) {
             return Color(0.0f);
         }
-        const Color albedo =
-            albedo_ ? albedo_->value(hit) : Color(1.0f);
-        return albedo * (1.0f / kPi);
+        return albedo(hit) * (1.0f / kPi);
     }
 
     float pdf(const Vec3& /*wo*/,
@@ -920,6 +1051,12 @@ public:
           normal_strength_(normal_strength),
           occlusion_tex_(occlusion_tex),
           occlusion_strength_(occlusion_strength) {}
+
+    Color albedo(const HitRecord& hit) const override {
+        const Color base_color = base_color_ ? base_color_->value(hit) : Color(1.0f);
+        const float metallic_value = metallic(hit);
+        return (1.0f - metallic_value) * base_color;
+    }
 
     Vec3 get_shading_normal(const HitRecord& hit) const override {
         if (normal_map_ && normal_map_->valid()) {

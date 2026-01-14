@@ -203,7 +203,9 @@ public:
             const float scatter_prob = (sigma_t > 0.0f) ? (sigma_s_at(p) / sigma_t) : 0.0f;
             if (rng.uniform() < scatter_prob) {
                 out.scattered = true;
-                out.weight = Color(scatter_prob, scatter_prob, scatter_prob);
+                // Delta tracking: sampling uses the majorant, so the event weight is sigma_s(p) / majorant.
+                const float w = (majorant_ > 0.0f) ? (sigma_s_at(p) / majorant_) : 0.0f;
+                out.weight = Color(w, w, w);
             } else {
                 out.scattered = false;
                 out.weight = Color(0.0f);

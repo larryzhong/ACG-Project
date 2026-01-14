@@ -10,6 +10,7 @@
 #include "io/obj_loader.h"
 #include "scene/material.h"
 #include "scene/medium.h"
+#include "scene/medium_boundary.h"
 #include "scene/mesh.h"
 #include "scene/moving_sphere.h"
 #include "scene/quad.h"
@@ -217,6 +218,156 @@ inline Scene build_fog_scene() {
 }
 
 // ==========================================
+// Scene: Inhomogeneous Bounded Volume (Gradient Block + Backlight)
+// ==========================================
+inline Scene build_gradient_volume_scene() {
+    Scene scene;
+
+    // Backlight: a small quad behind the volume, facing +Z.
+    // Give it a slight cool tint so the transmitted/scattered light reads more clearly.
+    auto light_tex = std::make_shared<SolidColor>(Color(10.0f, 14.0f, 34.0f));
+    auto light_mat = std::make_shared<DiffuseLight>(light_tex);
+
+    auto light = std::make_shared<Quad>(
+        Vec3(-0.35f, 0.55f, -2.8f),
+        Vec3(0.7f, 0.0f, 0.0f),
+        Vec3(0.0f, 0.7f, 0.0f),
+        light_mat);
+    scene.objects.push_back(light);
+    scene.lights.add_area_light(light);
+
+    // Solid object bounds (the boundary box) and the bounded inhomogeneous medium inside.
+    const Vec3 bmin(-0.6f, 0.20f, -1.90f);
+    const Vec3 bmax(0.6f, 1.40f, -0.90f);
+    const AABB bounds(bmin, bmax);
+
+    // Boundary material: diffuse reflection + transmission.
+    // This gives a "solid" surface appearance while still allowing rays to enter the volume.
+    auto boundary_albedo = std::make_shared<SolidColor>(Color(0.75f, 0.72f, 0.68f));
+    // Warm transmission tint (alabaster-like).
+    auto boundary_trans = std::make_shared<SolidColor>(Color(1.00f, 0.85f, 0.65f));
+    auto boundary_mat = std::make_shared<DiffuseTransmissionBoundary>(
+        boundary_albedo,
+        boundary_trans,
+        0.85f); // higher -> more volume-dominated appearance
+
+    const float dx = bmax.x - bmin.x;
+    const float dy = bmax.y - bmin.y;
+    const float dz = bmax.z - bmin.z;
+
+    // Front face (z = bmax.z), facing +Z
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(bmin.x, bmin.y, bmax.z),
+        Vec3(dx, 0.0f, 0.0f),
+        Vec3(0.0f, dy, 0.0f),
+        boundary_mat));
+
+    // Back face (z = bmin.z), facing -Z
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(bmax.x, bmin.y, bmin.z),
+        Vec3(-dx, 0.0f, 0.0f),
+        Vec3(0.0f, dy, 0.0f),
+        boundary_mat));
+
+    // Left face (x = bmin.x), facing -X
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(bmin.x, bmin.y, bmin.z),
+        Vec3(0.0f, 0.0f, dz),
+        Vec3(0.0f, dy, 0.0f),
+        boundary_mat));
+
+    // Right face (x = bmax.x), facing +X
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(bmax.x, bmin.y, bmax.z),
+        Vec3(0.0f, 0.0f, -dz),
+        Vec3(0.0f, dy, 0.0f),
+        boundary_mat));
+
+    // Bottom face (y = bmin.y), facing -Y
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(bmin.x, bmin.y, bmax.z),
+        Vec3(dx, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, -dz),
+        boundary_mat));
+
+    // Top face (y = bmax.y), facing +Y
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(bmin.x, bmax.y, bmin.z),
+        Vec3(dx, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, dz),
+        boundary_mat));
+
+    // Density: higher at the bottom, lower at the top.
+    // Increase contrast so the top/bottom differ more.
+    auto density = std::make_shared<LinearGradientDensityField>(
+        bmin.y, bmax.y,
+        1.5f, 0.05f);
+
+    // Coefficients tuned to look like a "solid" translucent block rather than thin fog.
+    auto inside_medium = std::make_shared<HeterogeneousMedium>(
+        bounds,
+        density,
+        2.0f,   // sigma_s
+        0.9f,  // sigma_a
+        2048);
+
+    // No global medium: medium exists only inside the boundary object.
+    scene.global_medium.reset();
+
+    // Replace boundary quads with medium-boundary wrappers (per-object medium interface).
+    // Note: we append new wrappers and remove the old quads below by rebuilding the list.
+    std::vector<HittablePtr> new_objects;
+    new_objects.reserve(scene.objects.size() + 8);
+
+    // Keep the light as-is.
+    new_objects.push_back(light);
+
+    const auto wrap_face = [&](const HittablePtr& face) {
+        new_objects.push_back(std::make_shared<MediumBoundary>(face, inside_medium));
+    };
+
+    wrap_face(std::make_shared<Quad>(
+        Vec3(bmin.x, bmin.y, bmax.z),
+        Vec3(dx, 0.0f, 0.0f),
+        Vec3(0.0f, dy, 0.0f),
+        boundary_mat));
+
+    wrap_face(std::make_shared<Quad>(
+        Vec3(bmax.x, bmin.y, bmin.z),
+        Vec3(-dx, 0.0f, 0.0f),
+        Vec3(0.0f, dy, 0.0f),
+        boundary_mat));
+
+    wrap_face(std::make_shared<Quad>(
+        Vec3(bmin.x, bmin.y, bmin.z),
+        Vec3(0.0f, 0.0f, dz),
+        Vec3(0.0f, dy, 0.0f),
+        boundary_mat));
+
+    wrap_face(std::make_shared<Quad>(
+        Vec3(bmax.x, bmin.y, bmax.z),
+        Vec3(0.0f, 0.0f, -dz),
+        Vec3(0.0f, dy, 0.0f),
+        boundary_mat));
+
+    wrap_face(std::make_shared<Quad>(
+        Vec3(bmin.x, bmin.y, bmax.z),
+        Vec3(dx, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, -dz),
+        boundary_mat));
+
+    wrap_face(std::make_shared<Quad>(
+        Vec3(bmin.x, bmax.y, bmin.z),
+        Vec3(dx, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, dz),
+        boundary_mat));
+
+    scene.objects = std::move(new_objects);
+
+    return scene;
+}
+
+// ==========================================
 // Scene: Subsurface Scattering Test (Solid Translucent)
 // ==========================================
 namespace simple_scene_builder_detail {
@@ -264,10 +415,188 @@ inline Scene build_sss_scene_impl() {
 
     return scene;
 }
+
+inline Scene build_sss_rgb_scene_impl(const Color& sigma_s_rgb, const Color& sigma_a_rgb) {
+    Scene scene;
+
+    // Keep surface albedo neutral so the color primarily comes from sigma_s/sigma_a.
+    auto wax_albedo = std::make_shared<SolidColor>(Color(1.0f, 1.0f, 1.0f));
+    MaterialPtr wax = std::make_shared<SubsurfaceRandomWalkMaterial>(
+        wax_albedo,
+        sigma_s_rgb,
+        sigma_a_rgb,
+        220,
+        60.0f);
+
+    // White backlight (color should be produced by the medium coefficients).
+    auto light_tex = std::make_shared<SolidColor>(Color(100.0f, 100.0f, 100.0f));
+    auto light_mat = std::make_shared<DiffuseLight>(light_tex);
+
+    // Area light behind the sphere (facing +Z)
+    auto light = std::make_shared<Quad>(
+        Vec3(-0.35f, 0.55f, -2.8f),
+        Vec3(0.7f, 0.0f, 0.0f),
+        Vec3(0.0f, 0.7f, 0.0f),
+        light_mat);
+    scene.objects.push_back(light);
+    scene.lights.add_area_light(light);
+
+    // The sphere
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.0f, 0.65f, -1.4f), 0.65f, wax));
+
+    return scene;
+}
 } // namespace simple_scene_builder_detail
 
 inline Scene build_sss_scene() {
     return simple_scene_builder_detail::build_sss_scene_impl();
+}
+
+inline Scene build_sss_red_scene() {
+    // Strong red scattering / absorption elsewhere.
+    return simple_scene_builder_detail::build_sss_rgb_scene_impl(
+        Color(0.03f, 0.01f, 0.01f),
+        Color(0.95f, 4, 4));
+}
+
+inline Scene build_sss_green_scene() {
+    return simple_scene_builder_detail::build_sss_rgb_scene_impl(
+        Color(0.01f, 0.03f, 0.01f),
+        Color(4, 0.95f, 4));
+}
+
+inline Scene build_sss_blue_scene() {
+    return simple_scene_builder_detail::build_sss_rgb_scene_impl(
+        Color(0.01f, 0.01f, 0.03f),
+        Color(4, 4, 0.95f));
+}
+
+// ==========================================
+// Scene 1b: Principled BSDF Showcase
+// ==========================================
+inline Scene build_simple_scene_pbr() {
+    Scene scene;
+
+    // Cornell-style box to keep lighting controlled and make BRDF differences obvious.
+    auto white_tex = std::make_shared<SolidColor>(Color(0.73f, 0.73f, 0.73f));
+    auto red_tex = std::make_shared<SolidColor>(Color(0.65f, 0.05f, 0.05f));
+    auto green_tex = std::make_shared<SolidColor>(Color(0.12f, 0.45f, 0.15f));
+
+    auto white = std::make_shared<Lambertian>(white_tex);
+    auto red = std::make_shared<Lambertian>(red_tex);
+    auto green = std::make_shared<Lambertian>(green_tex);
+
+    // Main light (bright)
+    auto light_tex = std::make_shared<SolidColor>(Color(15.0f, 15.0f, 15.0f));
+    auto light_mat = std::make_shared<DiffuseLight>(light_tex);
+
+    // Fill light (dimmer) for the area behind the camera
+    auto fill_light_tex = std::make_shared<SolidColor>(Color(5.0f, 5.0f, 5.0f));
+    auto fill_light_mat = std::make_shared<DiffuseLight>(fill_light_tex);
+
+    const float x0 = -1.0f, x1 = 1.0f;
+    const float y0 = 0.0f, y1 = 2.0f;
+    const float z_box_back = -2.0f;
+    const float z_studio_back = 4.0f; // Wall behind camera
+
+    // Floor (checker)
+    auto floor_even = std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f));
+    auto floor_odd = std::make_shared<SolidColor>(Color(0.3f, 0.3f, 0.3f));
+    auto floor_checker = std::make_shared<CheckerTexture>(floor_even, floor_odd, 2.0f);
+    auto floor_mat = std::make_shared<Lambertian>(floor_checker);
+
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z_box_back),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back),
+        floor_mat));
+
+    // Ceiling
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y1, z_box_back),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back),
+        white));
+
+    // Back wall
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z_box_back),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        white));
+
+    // Left wall (red)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z_studio_back),
+        Vec3(0.0f, 0.0f, z_box_back - z_studio_back),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        red));
+
+    // Right wall (green)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x1, y0, z_box_back),
+        Vec3(0.0f, 0.0f, z_studio_back - z_box_back),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        green));
+
+    // Studio back wall (behind camera)
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(x0, y0, z_studio_back),
+        Vec3(x1 - x0, 0.0f, 0.0f),
+        Vec3(0.0f, y1 - y0, 0.0f),
+        white));
+
+    // Lights
+    const float lx0 = -0.3f, lx1 = 0.3f;
+    const float lz0 = -1.3f, lz1 = -0.7f;
+    const float ly = y1 - 0.001f;
+
+    auto ceiling_light = std::make_shared<Quad>(
+        Vec3(lx0, ly, lz0),
+        Vec3(lx1 - lx0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, lz1 - lz0),
+        light_mat);
+    scene.objects.push_back(ceiling_light);
+    scene.lights.add_area_light(ceiling_light);
+
+    auto studio_light = std::make_shared<Quad>(
+        Vec3(lx0, ly, 1.8f),
+        Vec3(lx1 - lx0, 0.0f, 0.0f),
+        Vec3(0.0f, 0.0f, 0.6f),
+        fill_light_mat);
+    scene.objects.push_back(studio_light);
+    scene.lights.add_area_light(studio_light);
+
+    // --- Objects (Principled BSDF) ---
+    // 1) Dielectric-like plastic: metallic=0, medium roughness
+    auto plastic_base = std::make_shared<SolidColor>(Color(0.20f, 0.55f, 0.85f));
+    auto plastic = std::make_shared<PrincipledBSDF>(
+        plastic_base, 0.0f, nullptr, 0.30f, nullptr, nullptr, 1.0f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(-0.55f, 0.35f, -0.85f), 0.35f, plastic));
+
+    // 2) Metallic: metallic=1, smoother surface for a strong specular lobe
+    auto metal_base = std::make_shared<SolidColor>(Color(0.95f, 0.78f, 0.55f)); // warm metal tint
+    auto smooth_metal = std::make_shared<PrincipledBSDF>(
+        metal_base, 1.0f, nullptr, 0.12f, nullptr, nullptr, 1.0f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.55f, 0.35f, -0.95f), 0.35f, smooth_metal));
+
+    // 3) Textured + normal-mapped Principled: makes shading normal + mipmaps visible
+    auto earth_tex = std::make_shared<ImageTexture>("../assets/textures/2k_earth_daymap.jpg");
+    auto earth_normal = std::make_shared<NormalMapTexture>("../assets/textures/2k_earth_normal.png");
+    auto earth = std::make_shared<PrincipledBSDF>(
+        earth_tex, 0.0f, nullptr, 0.65f, nullptr, earth_normal, 1.0f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.0f, 0.55f, -1.45f), 0.30f, earth));
+
+    // 4) Glass (kept as dielectric for refraction; contrasts with Principled metal/plastic)
+    auto glass = std::make_shared<Dielectric>(1.5f);
+    scene.objects.push_back(
+        std::make_shared<Sphere>(Vec3(0.05f, 0.23f, -0.35f), 0.23f, glass));
+
+    return scene;
 }
 
 // ==========================================
@@ -494,6 +823,71 @@ inline Scene build_alpha_shadow_scene() {
         Vec3(-2, 5, -2), Vec3(2, 0, 0), Vec3(0, 0, 2), light_mat);
     scene.objects.push_back(light);
     scene.lights.add_area_light(light);
+
+    return scene;
+}
+
+// ==========================================
+// Scene: Mipmap Demo (Grazing High-Frequency Plane)
+// ==========================================
+inline Scene build_mipmap_demo_scene(const std::string& texture_path = "../assets/textures/Starry_Night.jpg") {
+    Scene scene;
+
+    auto plane_tex = std::make_shared<ImageTexture>(
+        texture_path,
+        ImageTexture::ColorSpace::sRGB,
+        /*channel=*/-1,
+        /*flip_v=*/true,
+        ImageTexture::WrapMode::Repeat,
+        ImageTexture::WrapMode::Repeat);
+
+    // Make the texture self-lit so the result isn't sensitive to light placement/exposure.
+    // This also isolates mipmap filtering differences (it's purely texture sampling).
+    auto plane_mat = std::make_shared<DiffuseLight>(plane_tex);
+
+    // A long "floor" plane that extends far away.
+    // We keep it almost horizontal and rely on a very low camera in main.cpp
+    // for a grazing view that produces strong minification.
+    const float w = 6.0f;
+    const float z_near = 2.0f;
+    const float z_far = -420.0f;
+    const float y = 0.0f;
+
+    auto add_strip = [&](float x0, float x1, float u_repeat, float v_repeat) {
+        const Vec3 p0(x0, y, z_near);
+        const Vec3 p1(x1, y, z_near);
+        const Vec3 p2(x0, y, z_far);
+        const Vec3 p3(x1, y, z_far);
+
+        const Vec3 e1 = p1 - p0;
+        const Vec3 e2 = p2 - p0;
+        const Vec3 n = normalize(cross(e1, e2));
+
+        std::vector<Vec3> positions = {p0, p1, p2, p3};
+        std::vector<Vec3> normals = {n, n, n, n};
+        std::vector<Vec2> uvs = {
+            Vec2(0.0f,      0.0f),
+            Vec2(u_repeat,  0.0f),
+            Vec2(0.0f,      v_repeat),
+            Vec2(u_repeat,  v_repeat),
+        };
+        std::vector<std::uint32_t> indices = {0, 1, 2, 2, 1, 3};
+
+        MeshDataPtr data =
+            std::make_shared<MeshData>(std::move(positions), std::move(normals), std::move(uvs), std::move(indices));
+        scene.objects.push_back(std::make_shared<Mesh>(data, Transform::identity(), plane_mat));
+    };
+
+    // Single high-frequency strip (best for demonstrating mipmap vs no-mipmap).
+    add_strip(-w, w, /*u_repeat=*/10.0f, /*v_repeat=*/1200.0f);
+
+    // A subtle horizon wall for visual reference (not lit, since the plane is emissive).
+    auto back_wall = std::make_shared<Lambertian>(std::make_shared<SolidColor>(Color(0.08f, 0.08f, 0.09f)));
+    scene.objects.push_back(std::make_shared<Quad>(
+        Vec3(-24.0f, 0.0f, z_far - 1.0f),
+        Vec3(48.0f, 0.0f, 0.0f),
+        Vec3(0.0f, 10.0f, 0.0f),
+        back_wall));
 
     return scene;
 }

@@ -9,6 +9,7 @@
 
 class Material;
 class Hittable;
+class Medium;
 
 struct HitRecord {
     Vec3 point;
@@ -20,6 +21,8 @@ struct HitRecord {
     float v;
     const Material* material;
     const Hittable* object = nullptr;
+    const Medium* medium_inside = nullptr;
+    const Medium* medium_outside = nullptr;
     bool front_face;
     Vec3 dpdu = Vec3(0.0f);
     Vec3 dpdv = Vec3(0.0f);
